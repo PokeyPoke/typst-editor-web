@@ -120,6 +120,41 @@ function setupLanding() {
     setLandingStatus('');
   });
 
+  // Session restore banner
+  const session = getTextSession();
+  if (session) {
+    const banner = document.getElementById('session-banner');
+    document.getElementById('session-filename').textContent = session.filename;
+    document.getElementById('session-age').textContent = timeAgo(session.savedAt);
+    const ic = session.imageCount || 0;
+    document.getElementById('session-imgs').textContent =
+      ic > 0 ? ` · ${ic} image${ic !== 1 ? 's' : ''}` : '';
+    banner.style.display = '';
+
+    document.getElementById('btn-resume-session').addEventListener('click', async () => {
+      banner.style.display = 'none';
+      setLandingStatus('Restoring session…');
+      const imgs = await loadImagesFromIDB();
+      imageFiles = imgs;
+      const uniqueCount = Object.keys(imageFiles).filter(k => !k.includes('/')).length;
+      if (uniqueCount > 0) {
+        imgCount.textContent = `${uniqueCount} image${uniqueCount !== 1 ? 's' : ''} loaded`;
+      }
+      enterEditor(session.source, session.filename);
+      if (uniqueCount > 0) {
+        showToast(`Session restored — ${uniqueCount} image${uniqueCount !== 1 ? 's' : ''} reloaded`, 'success');
+      } else {
+        showToast('Session restored', 'success');
+      }
+    });
+
+    document.getElementById('btn-discard-session').addEventListener('click', () => {
+      clearTextSession();
+      clearIDB();
+      banner.style.display = 'none';
+    });
+  }
+
   // Open existing: file load
   document.getElementById('btn-load-typ').addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', () => {
@@ -327,6 +362,7 @@ function enterEditor(src, fname) {
   source = src;
   sourceHistory = [];
   parsed = TypstParser.parse(source);
+  saveTextSession();
   showEditor();
   initWorker();
   triggerCompile();
@@ -359,6 +395,8 @@ async function loadImageFiles(files) {
   // Count unique files by bare filename (not path variants)
   const uniqueCount = Object.keys(imageFiles).filter(k => !k.includes('/')).length;
   imgCount.textContent = `${uniqueCount} image${uniqueCount !== 1 ? 's' : ''} loaded`;
+  saveTextSession();
+  saveImagesToIDB();
   if (appEl.style.display !== 'none') {
     showToast(`Loaded ${loaded.length} image${loaded.length !== 1 ? 's' : ''}`, 'success');
     triggerCompile();
@@ -388,10 +426,15 @@ function openDifferentFile() {
   sourceHistory = [];
   imgCount.textContent = '';
   btnDlPdf.disabled = true;
+  clearTextSession();
+  clearIDB();
   // Reset inputs so the same file can be re-selected
   fileInput.value = '';
   imgInput.value = '';
   appEl.style.display = 'none';
+  // Hide the session banner (it belongs to the file we just closed)
+  const banner = document.getElementById('session-banner');
+  if (banner) banner.style.display = 'none';
   landingEl.style.display = '';
   setLandingStatus('');
 }
@@ -628,6 +671,7 @@ function undoEdit() {
   }
   source = sourceHistory.pop();
   revision++;
+  saveTextSession();
   parsed = TypstParser.parse(source);
   buildTree();
   triggerCompile();
@@ -674,6 +718,7 @@ function applyEdit(el, changes) {
   const replacement = newText !== '' ? newText.split('\n') : [];
   source = [...before, ...replacement, ...after].join('\n');
   revision++;
+  saveTextSession();
 
   // If a ptitle title changed, sync the matching #fsec.update() and TOC entries
   let syncedExtra = false;
@@ -740,6 +785,7 @@ async function insertElement(pageNum, position, code) {
   lines.splice(insertLine, 0, ...code.split('\n'));
   source = lines.join('\n');
   revision++;
+  saveTextSession();
 
   parsed = TypstParser.parse(source);
   showToast('Element inserted', 'success');
@@ -886,6 +932,90 @@ function dlBlob(blob, name) {
   a.download = name;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+// ── Session persistence ────────────────────────────
+// Source + filename → localStorage  (fast, text-only)
+// Images            → IndexedDB     (handles binary, larger quota)
+
+const SESSION_KEY = 'typst-editor-session';
+let idb = null;
+
+async function openIDB() {
+  if (idb) return idb;
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('typst-editor', 1);
+    req.onupgradeneeded = (e) => {
+      const d = e.target.result;
+      if (!d.objectStoreNames.contains('images')) d.createObjectStore('images');
+    };
+    req.onsuccess  = (e) => { idb = e.target.result; resolve(idb); };
+    req.onerror    = ()  => reject(req.error);
+  });
+}
+
+function saveTextSession() {
+  try {
+    const imageNames = Object.keys(imageFiles).filter(k => !k.includes('/'));
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
+      source, filename, savedAt: Date.now(), imageCount: imageNames.length,
+    }));
+  } catch (_) {}
+}
+
+async function saveImagesToIDB() {
+  try {
+    const d = await openIDB();
+    const tx = d.transaction('images', 'readwrite');
+    const store = tx.objectStore('images');
+    store.clear();
+    for (const [path, buf] of Object.entries(imageFiles)) store.put(buf, path);
+  } catch (_) {}
+}
+
+async function loadImagesFromIDB() {
+  try {
+    const d = await openIDB();
+    return await new Promise((resolve) => {
+      const tx = d.transaction('images', 'readonly');
+      const result = {};
+      const req = tx.objectStore('images').openCursor();
+      req.onsuccess = (e) => {
+        const cur = e.target.result;
+        if (cur) { result[cur.key] = cur.value; cur.continue(); }
+        else resolve(result);
+      };
+      req.onerror = () => resolve({});
+    });
+  } catch (_) { return {}; }
+}
+
+async function clearIDB() {
+  try {
+    const d = await openIDB();
+    d.transaction('images', 'readwrite').objectStore('images').clear();
+  } catch (_) {}
+}
+
+function getTextSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const s = JSON.parse(raw);
+    return (s?.source && s?.filename) ? s : null;
+  } catch (_) { return null; }
+}
+
+function clearTextSession() {
+  localStorage.removeItem(SESSION_KEY);
+}
+
+function timeAgo(ms) {
+  const s = Math.floor((Date.now() - ms) / 1000);
+  if (s < 60)  return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} hr ago`;
+  return `${Math.floor(s / 86400)} day(s) ago`;
 }
 
 // ── Toast ──────────────────────────────────────────

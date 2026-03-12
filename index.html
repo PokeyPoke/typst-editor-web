@@ -14,6 +14,20 @@
       <h1>Typst Element Editor</h1>
       <p class="landing-sub">Edit and create structured Typst documents in the browser — no server required.</p>
 
+      <!-- Session restore banner (shown by JS when a saved session exists) -->
+      <div id="session-banner" class="session-banner" style="display:none">
+        <div class="session-banner-info">
+          <span class="session-banner-label">Resume last session</span>
+          <span id="session-filename" class="session-banner-filename"></span>
+          <span id="session-age" class="session-banner-age"></span>
+          <span id="session-imgs" class="session-banner-imgs"></span>
+        </div>
+        <div class="session-banner-btns">
+          <button class="btn btn-primary" id="btn-resume-session">Resume</button>
+          <button class="btn btn-secondary" id="btn-discard-session">Discard</button>
+        </div>
+      </div>
+
       <!-- Tab bar -->
       <div class="landing-tabs">
         <button class="landing-tab active" id="tab-open">Open existing</button>

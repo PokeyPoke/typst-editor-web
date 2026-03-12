@@ -68,6 +68,21 @@ html, body { height: 100%; font-family: system-ui, -apple-system, sans-serif; fo
 }
 .landing-status.error { color: var(--danger); }
 
+/* ── Session restore banner ──────────────────────── */
+.session-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: var(--primary-bg); border: 1px solid var(--primary-light);
+  border-radius: var(--radius); padding: 10px 14px; margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.session-banner-info { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: 1; }
+.session-banner-label { font-size: 11px; font-weight: 700; color: var(--primary); text-transform: uppercase; letter-spacing: 0.4px; }
+.session-banner-filename { font-size: 12px; font-weight: 600; color: var(--ink); }
+.session-banner-age { font-size: 11px; color: var(--muted); }
+.session-banner-imgs { font-size: 11px; color: var(--muted); }
+.session-banner-btns { display: flex; gap: 6px; flex-shrink: 0; }
+.session-banner-btns .btn { padding: 5px 12px; font-size: 11px; }
+
 /* ── Landing tabs ─────────────────────────────────── */
 .landing-tabs {
   display: flex; gap: 0; margin-bottom: 20px;
