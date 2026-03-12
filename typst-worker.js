@@ -102,7 +102,6 @@ async function initCompiler() {
 
   postProgress(`Building compiler (${fontCount} fonts loaded)…`);
   compiler = await builder.build();
-  console.log('[typst-worker] compiler methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(compiler)));
   postReady();
 }
 
@@ -139,23 +138,35 @@ async function doCompile(source, files) {
     return null;
   };
 
-  // Helper: extract a printable message from any thrown value (including WASM panics)
-  const errStr = (e) => {
-    if (e == null) return 'unknown error';
+  // Format a thrown value into a human-readable error string.
+  // The WASM compiler throws an Array of SourceDiagnostic objects on Typst errors.
+  const formatThrown = (e) => {
+    if (e == null) return 'Unknown error';
     if (typeof e === 'string') return e || '(empty error)';
-    const msg = (e instanceof Error) ? e.message : undefined;
-    if (msg != null && msg !== '') return msg;
+    if (e instanceof Error) return e.message || e.toString();
+    // Array of SourceDiagnostic — extract only Error-severity messages
+    if (Array.isArray(e)) {
+      const errors = e.filter(d => String(d?.severity) === 'Error');
+      const target = errors.length ? errors : e;
+      return target.map(d => d?.message ? `error: ${d.message}${d.hints?.length ? '\nhint: ' + d.hints[0] : ''}` : String(d)).join('\n');
+    }
     const s = String(e);
-    if (s && s !== '[object Object]') return s;
-    try { return JSON.stringify(e); } catch (_) { return '(unserializable error)'; }
+    return (s && s !== '[object Object]') ? s : JSON.stringify(e);
   };
 
+  // When the WASM compiler throws an Array of SourceDiagnostic, that IS the
+  // compile error — the fallback path will get the identical diagnostics, so
+  // skip it and surface the Typst errors directly.
+  const isTypstDiagnostics = (e) => Array.isArray(e) && e.length > 0 && e[0]?.message !== undefined;
+
   try {
-    // Primary: TypstCompiler.compile() — pass undefined (not null) for optional wasm-bindgen params
     const result = compiler.compile('/main.typ', undefined, 'pdf', 1);
     pdfBytes = extractBytes(result);
     diagnostics = result?.diagnostics ?? null;
   } catch (compileErr) {
+    if (isTypstDiagnostics(compileErr)) {
+      throw new Error(formatThrown(compileErr));
+    }
     console.error('[typst-worker] compile() threw:', compileErr);
     // Fallback: snapshot → get_artifact('pdf', 1)
     try {
@@ -166,7 +177,7 @@ async function doCompile(source, files) {
       diagnostics = result?.diagnostics ?? null;
     } catch (snapshotErr) {
       console.error('[typst-worker] snapshot() threw:', snapshotErr);
-      throw new Error('Compile failed: ' + errStr(compileErr) + ' / ' + errStr(snapshotErr));
+      throw new Error(formatThrown(compileErr) + '\n---\n' + formatThrown(snapshotErr));
     }
   }
 

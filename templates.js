@@ -446,6 +446,11 @@ ${subtitle ? `  #v(5mm)\n  #text(size: 13pt, fill: muted, "${escTyp(subtitle)}")
     - Point two
     - Point three
   ],
+  tcard(num: none, title: "Details")[
+    - Detail one
+    - Detail two
+    - Detail three
+  ],
   ibox(type: "note")[
     Add notes relevant to "${escTyp(name)}".
   ],
