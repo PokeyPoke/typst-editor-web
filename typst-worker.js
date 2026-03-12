@@ -102,6 +102,7 @@ async function initCompiler() {
 
   postProgress(`Building compiler (${fontCount} fonts loaded)…`);
   compiler = await builder.build();
+  console.log('[typst-worker] compiler methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(compiler)));
   postReady();
 }
 
@@ -138,29 +139,33 @@ async function doCompile(source, files) {
     return null;
   };
 
-  // Helper: extract a printable message from any thrown value
+  // Helper: extract a printable message from any thrown value (including WASM panics)
   const errStr = (e) => {
-    if (!e) return 'unknown error';
-    if (typeof e === 'string') return e;
-    if (e instanceof Error) return e.message;
+    if (e == null) return 'unknown error';
+    if (typeof e === 'string') return e || '(empty error)';
+    const msg = (e instanceof Error) ? e.message : undefined;
+    if (msg != null && msg !== '') return msg;
     const s = String(e);
-    return s !== '[object Object]' ? s : JSON.stringify(e);
+    if (s && s !== '[object Object]') return s;
+    try { return JSON.stringify(e); } catch (_) { return '(unserializable error)'; }
   };
 
   try {
-    // Primary: TypstCompiler.compile() with string format 'pdf'
-    const result = compiler.compile('/main.typ', null, 'pdf', 1);
+    // Primary: TypstCompiler.compile() — pass undefined (not null) for optional wasm-bindgen params
+    const result = compiler.compile('/main.typ', undefined, 'pdf', 1);
     pdfBytes = extractBytes(result);
     diagnostics = result?.diagnostics ?? null;
   } catch (compileErr) {
-    // Fallback: snapshot → TypstCompileWorld.get_artifact(1=pdf, 1=diag_none)
+    console.error('[typst-worker] compile() threw:', compileErr);
+    // Fallback: snapshot → get_artifact('pdf', 1)
     try {
-      const world = compiler.snapshot(null, '/main.typ', null);
-      const result = world.get_artifact(1, 1);
+      const world = compiler.snapshot(undefined, '/main.typ', undefined);
+      const result = world.get_artifact('pdf', 1);
       if (typeof world.free === 'function') world.free();
       pdfBytes = extractBytes(result);
       diagnostics = result?.diagnostics ?? null;
     } catch (snapshotErr) {
+      console.error('[typst-worker] snapshot() threw:', snapshotErr);
       throw new Error('Compile failed: ' + errStr(compileErr) + ' / ' + errStr(snapshotErr));
     }
   }
