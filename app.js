@@ -41,6 +41,7 @@ const compileStatus      = document.getElementById('compile-status');
 const errorPanel         = document.getElementById('compile-error-panel');
 const errorText          = document.getElementById('compile-error-text');
 const previewPlaceholder = document.getElementById('preview-placeholder');
+const previewPanel       = document.getElementById('preview-panel');
 const btnDlTyp           = document.getElementById('btn-download-typ');
 const btnDlPdf           = document.getElementById('btn-download-pdf');
 const btnAddImages       = document.getElementById('btn-add-images');
@@ -424,6 +425,10 @@ async function renderPdfPages(pdfBytes) {
   // PDF.js uses 72pt/inch. A4 = 595pt wide. Scale to ~500px to match SVG cards.
   const SCALE = 500 / 595;
 
+  // Remember where we are before wiping the container
+  const returnToPage = selectedElement?.page ?? null;
+  const savedScrollTop = previewPanel.scrollTop;
+
   const loadTask = pdfjsLib.getDocument({
     data: pdfBytes,
     disableRange: true,
@@ -460,6 +465,17 @@ async function renderPdfPages(pdfBytes) {
 
     pageDiv.addEventListener('click', (e) => handlePageClick(i, e, pageDiv));
     svgContainer.appendChild(pageDiv);
+  }
+
+  // Restore position after render
+  if (returnToPage !== null) {
+    const pageDiv = svgContainer.querySelector(`.svg-page[data-page="${returnToPage}"]`);
+    if (pageDiv) {
+      pageDiv.classList.add('active');
+      pageDiv.scrollIntoView({ behavior: 'instant', block: 'start' });
+    }
+  } else {
+    previewPanel.scrollTop = savedScrollTop;
   }
 }
 
