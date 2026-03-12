@@ -149,6 +149,10 @@ function setupLanding() {
     });
 
     document.getElementById('btn-discard-session').addEventListener('click', () => {
+      if (!confirm(
+        `Permanently discard the saved session for "${session.filename}"?\n\n` +
+        `This cannot be undone.`
+      )) return;
       clearTextSession();
       clearIDB();
       banner.style.display = 'none';
@@ -416,6 +420,10 @@ function showEditor() {
 }
 
 function openDifferentFile() {
+  if (source && !confirm(
+    `Close "${filename}" and return to the start page?\n\n` +
+    `Your work is auto-saved and can be resumed from the landing page.`
+  )) return;
   if (worker) { worker.terminate(); worker = null; }
   source = '';
   filename = 'document.typ';
