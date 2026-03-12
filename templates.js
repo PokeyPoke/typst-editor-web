@@ -347,11 +347,9 @@ ${author   ? `    #v(3mm)\n    #text(size: 11pt, fill: muted, "${escTyp(author)}
     - Item two
     - Item three
   ],
-  grid.cell(colspan: 2,
-    ibox(type: "note")[
-      Add notes or warnings relevant to this section.
-    ]
-  ),
+  ibox(type: "note")[
+    Add notes or warnings relevant to this section.
+  ],
 )
 `;
     });
@@ -448,11 +446,9 @@ ${subtitle ? `  #v(5mm)\n  #text(size: 13pt, fill: muted, "${escTyp(subtitle)}")
     - Point two
     - Point three
   ],
-  grid.cell(colspan: 2,
-    ibox(type: "note")[
-      Add notes relevant to "${escTyp(name)}".
-    ]
-  ),
+  ibox(type: "note")[
+    Add notes relevant to "${escTyp(name)}".
+  ],
 )
 `;
     });

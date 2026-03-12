@@ -138,6 +138,15 @@ async function doCompile(source, files) {
     return null;
   };
 
+  // Helper: extract a printable message from any thrown value
+  const errStr = (e) => {
+    if (!e) return 'unknown error';
+    if (typeof e === 'string') return e;
+    if (e instanceof Error) return e.message;
+    const s = String(e);
+    return s !== '[object Object]' ? s : JSON.stringify(e);
+  };
+
   try {
     // Primary: TypstCompiler.compile() with string format 'pdf'
     const result = compiler.compile('/main.typ', null, 'pdf', 1);
@@ -152,7 +161,7 @@ async function doCompile(source, files) {
       pdfBytes = extractBytes(result);
       diagnostics = result?.diagnostics ?? null;
     } catch (snapshotErr) {
-      throw new Error('Compile failed: ' + compileErr.message + ' / ' + snapshotErr.message);
+      throw new Error('Compile failed: ' + errStr(compileErr) + ' / ' + errStr(snapshotErr));
     }
   }
 
