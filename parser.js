@@ -183,6 +183,19 @@ const TypstParser = (() => {
               }
             }
             pages.push({ lineStart: coverEndLine + 1, sectionName: pageSec || 'Table of Contents', pageNum: 2 });
+            // Add the cover block as an editable element (source-only)
+            elements.push({
+              type: 'page-block',
+              title: 'Cover Page',
+              args: {},
+              body: src.slice(si + 1, bracketEnd),
+              lineStart: lineAt(src, pStart),
+              lineEnd: coverEndLine,
+              bodyLineStart: lineAt(src, si + 1),
+              bodyLineEnd: coverEndLine,
+              page: 1,
+              sourceSlice: src.slice(pStart, bracketEnd + 1),
+            });
           }
         }
       }

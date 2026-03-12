@@ -211,6 +211,7 @@ html, body { height: 100%; font-family: system-ui, -apple-system, sans-serif; fo
   background: var(--primary-light); color: var(--primary);
 }
 .tree-item.selected .type-badge { background: rgba(255,255,255,0.25); color: white; }
+.tree-item .type-badge.badge-page { background: #e8e0f7; color: #5b4a9e; }
 
 /* ── Edit Panel ──────────────────────────────────── */
 #edit-container {

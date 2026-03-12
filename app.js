@@ -523,8 +523,8 @@ function buildTree() {
       item.dataset.lineStart = el.lineStart;
 
       const badge = document.createElement('span');
-      badge.className = 'type-badge';
-      badge.textContent = el.type;
+      badge.className = 'type-badge' + (el.type === 'page-block' ? ' badge-page' : '');
+      badge.textContent = el.type === 'page-block' ? 'cover' : el.type;
       item.appendChild(badge);
 
       const name = document.createElement('span');

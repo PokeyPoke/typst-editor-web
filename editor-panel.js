@@ -79,7 +79,7 @@ const EditorPanel = (() => {
 
     const header = document.createElement('div');
     header.className = 'edit-section-title';
-    header.textContent = el.type.toUpperCase();
+    header.textContent = el.type === 'page-block' ? 'COVER PAGE' : el.type.toUpperCase();
     wrap.appendChild(header);
 
     const info = document.createElement('div');
@@ -87,24 +87,33 @@ const EditorPanel = (() => {
     info.textContent = `Lines ${el.lineStart}–${el.lineEnd} · Page ${el.page}`;
     wrap.appendChild(info);
 
+    // page-block: source-only, no Properties tab
+    const sourceOnly = el.type === 'page-block';
+
     // Tabs
     const tabBar = document.createElement('div');
     tabBar.className = 'tab-bar';
-    const tabProps  = mkTab('Properties', true);
-    const tabSource = mkTab('Source', false);
-    tabBar.appendChild(tabProps);
+    const tabProps  = mkTab('Properties', !sourceOnly);
+    const tabSource = mkTab('Source', sourceOnly);
+    if (!sourceOnly) tabBar.appendChild(tabProps);
     tabBar.appendChild(tabSource);
     wrap.appendChild(tabBar);
 
     // Properties panel
     const propsPanel = document.createElement('div');
-    propsPanel.className = 'tab-panel';
-    const fields = buildPropertyFields(el, propsPanel);
-    wrap.appendChild(propsPanel);
+    propsPanel.className = 'tab-panel' + (sourceOnly ? ' hidden' : '');
+    const fields = sourceOnly ? {} : buildPropertyFields(el, propsPanel);
+    if (!sourceOnly) wrap.appendChild(propsPanel);
 
     // Source panel
     const sourcePanel = document.createElement('div');
-    sourcePanel.className = 'tab-panel hidden';
+    sourcePanel.className = 'tab-panel' + (sourceOnly ? '' : ' hidden');
+    if (sourceOnly) {
+      const hint = document.createElement('div');
+      hint.style.cssText = 'font-size:11px;color:var(--muted);margin-bottom:8px;font-style:italic';
+      hint.textContent = 'Edit the cover page layout directly. Changes apply to the full #page(…)[…] block.';
+      sourcePanel.appendChild(hint);
+    }
     const sourceTa = document.createElement('textarea');
     sourceTa.className = 'source-editor';
     sourceTa.value = el.sourceSlice;
@@ -112,8 +121,10 @@ const EditorPanel = (() => {
     sourcePanel.appendChild(sourceTa);
     wrap.appendChild(sourcePanel);
 
-    tabProps.addEventListener('click',  () => activate(tabProps, tabSource, propsPanel, sourcePanel));
-    tabSource.addEventListener('click', () => activate(tabSource, tabProps, sourcePanel, propsPanel));
+    if (!sourceOnly) {
+      tabProps.addEventListener('click',  () => activate(tabProps, tabSource, propsPanel, sourcePanel));
+      tabSource.addEventListener('click', () => activate(tabSource, tabProps, sourcePanel, propsPanel));
+    }
 
     // Buttons
     const btnRow = document.createElement('div');
