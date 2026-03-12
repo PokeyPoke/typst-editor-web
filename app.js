@@ -433,11 +433,7 @@ function showEditor() {
   if (previewPlaceholder) previewPlaceholder.style.display = '';
 }
 
-function openDifferentFile() {
-  if (source && !confirm(
-    `Close "${filename}" and return to the start page?\n\n` +
-    `Your work is auto-saved and can be resumed from the landing page.`
-  )) return;
+function doCloseEditor() {
   if (worker) { worker.terminate(); worker = null; }
   source = '';
   filename = 'document.typ';
@@ -448,14 +444,43 @@ function openDifferentFile() {
   sourceHistory = [];
   imgCount.textContent = '';
   btnDlPdf.disabled = true;
-  // Reset inputs so the same file can be re-selected
   fileInput.value = '';
   imgInput.value = '';
   appEl.style.display = 'none';
   landingEl.style.display = '';
   setLandingStatus('');
-  // Show the resume banner for the session we just left
   showSessionBannerIfNeeded();
+}
+
+function openDifferentFile() {
+  if (!source) { doCloseEditor(); return; }
+
+  const modal = document.getElementById('unsaved-modal');
+  document.getElementById('unsaved-modal-filename').textContent = filename;
+  modal.style.display = 'flex';
+
+  const btnDownload = document.getElementById('btn-modal-download');
+  const btnContinue = document.getElementById('btn-modal-continue');
+  const btnCancel   = document.getElementById('btn-modal-cancel');
+
+  function close() { modal.style.display = 'none'; }
+
+  // Clone to clear any stale listeners
+  const freshDownload = btnDownload.cloneNode(true);
+  const freshContinue = btnContinue.cloneNode(true);
+  const freshCancel   = btnCancel.cloneNode(true);
+  btnDownload.replaceWith(freshDownload);
+  btnContinue.replaceWith(freshContinue);
+  btnCancel.replaceWith(freshCancel);
+
+  freshDownload.addEventListener('click', () => {
+    close();
+    downloadTyp();
+    doCloseEditor();
+  });
+  freshContinue.addEventListener('click', () => { close(); doCloseEditor(); });
+  freshCancel.addEventListener('click', close);
+  modal.addEventListener('click', (e) => { if (e.target === modal) close(); }, { once: true });
 }
 
 // ── Compile ────────────────────────────────────────
@@ -1066,3 +1091,11 @@ document.getElementById('btn-dismiss-error').addEventListener('click', () => {
   errorPanel.style.display = 'none';
 });
 btnDlPdf.disabled = true;
+
+// Warn before closing/refreshing the tab while a document is open
+window.addEventListener('beforeunload', (e) => {
+  if (source) {
+    e.preventDefault();
+    e.returnValue = 'You have unsaved changes. Download the .typ file before leaving.';
+  }
+});
