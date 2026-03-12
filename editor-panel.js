@@ -494,7 +494,8 @@ const EditorPanel = (() => {
     'ok-bg': 'Success Background', 'ok-c': 'Success Color',
     'dng-bg': 'Danger Background', 'dng-c': 'Danger Color',
     'card-stroke-top': 'Card Top Border', 'card-stroke-rest': 'Card Border',
-    'card-inset': 'Card Padding', 'title-bar-w': 'Title Bar Width',
+    'card-inset': 'Card Padding', 'card-radius': 'Corner Radius',
+    'title-bar-w': 'Title Bar Width',
   };
   function friendlyName(n) {
     return FRIENDLY[n] || n.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());

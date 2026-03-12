@@ -26,6 +26,7 @@ const Templates = (() => {
 #let card-stroke-top  = 5pt
 #let card-stroke-rest = 1.5pt
 #let card-inset       = 6mm
+#let card-radius      = 4pt
 #let title-bar-w      = 42mm
 
 // ── Footer state ─────────────────────────────────────
@@ -51,42 +52,50 @@ const Templates = (() => {
 
 // ── Helper: task card (num: none = no badge) ─────────
 #let tcard(num: none, title: "", inset: card-inset, colspan: 1, body) = grid.cell(
-  colspan: colspan,
-  fill: gradient.linear(white, rgb("#f7fbff"), dir: ttb),
-  stroke: (top: card-stroke-top + primary, rest: card-stroke-rest + lc),
-  inset: inset,
+  colspan: colspan, inset: 0pt, fill: none, stroke: none,
 )[
-  #if num != none [
-    #grid(
-      columns: (auto, 1fr),
-      gutter: 5mm,
-      align: horizon,
-      badge(num),
-      text(size: 10pt, weight: "bold", fill: primary, upper(title))
-    )
-  ] else [
-    #text(size: 10pt, weight: "bold", fill: primary, upper(title))
+  #block(
+    width: 100%,
+    fill: gradient.linear(white, rgb("#f7fbff"), dir: ttb),
+    stroke: (top: card-stroke-top + primary, rest: card-stroke-rest + lc),
+    radius: card-radius, inset: inset,
+  )[
+    #if num != none [
+      #grid(
+        columns: (auto, 1fr),
+        gutter: 5mm,
+        align: horizon,
+        badge(num),
+        text(size: 10pt, weight: "bold", fill: primary, upper(title))
+      )
+    ] else [
+      #text(size: 10pt, weight: "bold", fill: primary, upper(title))
+    ]
+    #line(length: 100%, stroke: 1pt + lc)
+    #v(2mm)
+    #set text(size: 9pt, fill: muted)
+    #set par(leading: 4pt)
+    #body
   ]
-  #line(length: 100%, stroke: 1pt + lc)
-  #v(2mm)
-  #set text(size: 9pt, fill: muted)
-  #set par(leading: 4pt)
-  #body
 ]
 
 // ── Helper: full-width section intro box ─────────────
 #let sintro(title, colspan: 2, body) = grid.cell(
-  colspan: colspan,
-  fill: gradient.linear(rgb("#eef5ff"), white, dir: ltr),
-  stroke: (left: 5pt + primary, top: 1.5pt + lc,
-           bottom: 1.5pt + lc, right: 1.5pt + lc),
-  inset: (x: 7mm, y: 5mm),
+  colspan: colspan, inset: 0pt, fill: none, stroke: none,
 )[
-  #text(size: 11pt, weight: "bold", fill: primary, upper(title))
-  #v(3mm)
-  #set text(size: 9pt, fill: muted)
-  #set par(leading: 4pt)
-  #body
+  #block(
+    width: 100%,
+    fill: gradient.linear(rgb("#eef5ff"), white, dir: ltr),
+    stroke: (left: 5pt + primary, top: 1.5pt + lc,
+             bottom: 1.5pt + lc, right: 1.5pt + lc),
+    radius: card-radius, inset: (x: 7mm, y: 5mm),
+  )[
+    #text(size: 11pt, weight: "bold", fill: primary, upper(title))
+    #v(3mm)
+    #set text(size: 9pt, fill: muted)
+    #set par(leading: 4pt)
+    #body
+  ]
 ]
 
 // ── Helper: info / warning / success / danger box ────
@@ -99,19 +108,23 @@ const Templates = (() => {
        else if label == none  { none }
        else                   { label }
   grid.cell(
-    colspan: colspan, fill: bg,
-    stroke: (left: 4pt + bc, top: 0pt, bottom: 0pt, right: 0pt),
-    inset: (x: 7mm, y: 5mm),
+    colspan: colspan, inset: 0pt, fill: none, stroke: none,
   )[
-    #if lbl != none [
-      #text(size: 8pt, weight: "bold", fill: bc, upper(lbl))
-      #v(1.5mm)
-      #line(length: 100%, stroke: 0.5pt + bc.transparentize(60%))
-      #v(2mm)
+    #block(
+      width: 100%, fill: bg,
+      stroke: (left: 4pt + bc, top: none, bottom: none, right: none),
+      radius: (right: card-radius), inset: (x: 7mm, y: 5mm),
+    )[
+      #if lbl != none [
+        #text(size: 8pt, weight: "bold", fill: bc, upper(lbl))
+        #v(1.5mm)
+        #line(length: 100%, stroke: 0.5pt + bc.transparentize(60%))
+        #v(2mm)
+      ]
+      #set text(size: 9pt, fill: muted)
+      #set par(leading: 4pt)
+      #body
     ]
-    #set text(size: 9pt, fill: muted)
-    #set par(leading: 4pt)
-    #body
   ]
 }
 
