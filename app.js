@@ -675,8 +675,37 @@ function applyEdit(el, changes) {
   source = [...before, ...replacement, ...after].join('\n');
   revision++;
 
+  // If a ptitle title changed, sync the matching #fsec.update() and TOC entries
+  let syncedExtra = false;
+  if (el.type === 'ptitle' && '_title' in changes && el.title !== changes._title) {
+    const oldT = el.title;
+    const newT = changes._title;
+
+    // 1. Update all #fsec.update("old title") occurrences globally (drives footer)
+    const fsecPat = new RegExp('#fsec\\.update\\("' + escRx(oldT) + '"\\)', 'g');
+    source = source.replace(fsecPat, `#fsec.update("${escTyp(newT)}")`);
+
+    // 2. Update TOC text: replace "old title" as a string literal in every line
+    //    that appears before this element's original position (TOC is always earlier)
+    const srcLines = source.split('\n');
+    const quotedOld = `"${escTyp(oldT)}"`;
+    const quotedNew = `"${escTyp(newT)}"`;
+    for (let i = 0; i < el.lineStart - 1; i++) {
+      if (srcLines[i].includes(quotedOld)) {
+        srcLines[i] = srcLines[i].replaceAll(quotedOld, quotedNew);
+        syncedExtra = true;
+      }
+    }
+    source = srcLines.join('\n');
+  }
+
   parsed = TypstParser.parse(source);
-  showToast(changes.__delete ? 'Element deleted' : 'Applied successfully', 'success');
+  const toastMsg = changes.__delete
+    ? 'Element deleted'
+    : syncedExtra
+      ? 'Applied — TOC and footer updated to match'
+      : 'Applied successfully';
+  showToast(toastMsg, 'success');
 
   buildTree();
   triggerCompile();
