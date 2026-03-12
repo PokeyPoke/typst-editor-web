@@ -102,6 +102,56 @@ function setCompileStatus(text) {
 
 // ── Landing ────────────────────────────────────────
 
+function showSessionBannerIfNeeded() {
+  const banner = document.getElementById('session-banner');
+  const session = getTextSession();
+  if (!session) {
+    banner.style.display = 'none';
+    return;
+  }
+
+  document.getElementById('session-filename').textContent = session.filename;
+  document.getElementById('session-age').textContent = timeAgo(session.savedAt);
+  const ic = session.imageCount || 0;
+  document.getElementById('session-imgs').textContent =
+    ic > 0 ? ` · ${ic} image${ic !== 1 ? 's' : ''}` : '';
+  banner.style.display = '';
+
+  // Clone buttons to remove any stale listeners from a previous call
+  const btnResume  = document.getElementById('btn-resume-session');
+  const btnDiscard = document.getElementById('btn-discard-session');
+  const freshResume  = btnResume.cloneNode(true);
+  const freshDiscard = btnDiscard.cloneNode(true);
+  btnResume.replaceWith(freshResume);
+  btnDiscard.replaceWith(freshDiscard);
+
+  freshResume.addEventListener('click', async () => {
+    banner.style.display = 'none';
+    setLandingStatus('Restoring session…');
+    const imgs = await loadImagesFromIDB();
+    imageFiles = imgs;
+    const uniqueCount = Object.keys(imageFiles).filter(k => !k.includes('/')).length;
+    if (uniqueCount > 0) {
+      imgCount.textContent = `${uniqueCount} image${uniqueCount !== 1 ? 's' : ''} loaded`;
+    }
+    enterEditor(session.source, session.filename);
+    if (uniqueCount > 0) {
+      showToast(`Session restored — ${uniqueCount} image${uniqueCount !== 1 ? 's' : ''} reloaded`, 'success');
+    } else {
+      showToast('Session restored', 'success');
+    }
+  });
+
+  freshDiscard.addEventListener('click', () => {
+    if (!confirm(
+      `Permanently discard the saved session for "${session.filename}"?\n\nThis cannot be undone.`
+    )) return;
+    clearTextSession();
+    clearIDB();
+    banner.style.display = 'none';
+  });
+}
+
 function setupLanding() {
   // Tab switching
   const tabOpen = document.getElementById('tab-open');
@@ -121,43 +171,7 @@ function setupLanding() {
   });
 
   // Session restore banner
-  const session = getTextSession();
-  if (session) {
-    const banner = document.getElementById('session-banner');
-    document.getElementById('session-filename').textContent = session.filename;
-    document.getElementById('session-age').textContent = timeAgo(session.savedAt);
-    const ic = session.imageCount || 0;
-    document.getElementById('session-imgs').textContent =
-      ic > 0 ? ` · ${ic} image${ic !== 1 ? 's' : ''}` : '';
-    banner.style.display = '';
-
-    document.getElementById('btn-resume-session').addEventListener('click', async () => {
-      banner.style.display = 'none';
-      setLandingStatus('Restoring session…');
-      const imgs = await loadImagesFromIDB();
-      imageFiles = imgs;
-      const uniqueCount = Object.keys(imageFiles).filter(k => !k.includes('/')).length;
-      if (uniqueCount > 0) {
-        imgCount.textContent = `${uniqueCount} image${uniqueCount !== 1 ? 's' : ''} loaded`;
-      }
-      enterEditor(session.source, session.filename);
-      if (uniqueCount > 0) {
-        showToast(`Session restored — ${uniqueCount} image${uniqueCount !== 1 ? 's' : ''} reloaded`, 'success');
-      } else {
-        showToast('Session restored', 'success');
-      }
-    });
-
-    document.getElementById('btn-discard-session').addEventListener('click', () => {
-      if (!confirm(
-        `Permanently discard the saved session for "${session.filename}"?\n\n` +
-        `This cannot be undone.`
-      )) return;
-      clearTextSession();
-      clearIDB();
-      banner.style.display = 'none';
-    });
-  }
+  showSessionBannerIfNeeded();
 
   // Open existing: file load
   document.getElementById('btn-load-typ').addEventListener('click', () => fileInput.click());
@@ -434,17 +448,14 @@ function openDifferentFile() {
   sourceHistory = [];
   imgCount.textContent = '';
   btnDlPdf.disabled = true;
-  clearTextSession();
-  clearIDB();
   // Reset inputs so the same file can be re-selected
   fileInput.value = '';
   imgInput.value = '';
   appEl.style.display = 'none';
-  // Hide the session banner (it belongs to the file we just closed)
-  const banner = document.getElementById('session-banner');
-  if (banner) banner.style.display = 'none';
   landingEl.style.display = '';
   setLandingStatus('');
+  // Show the resume banner for the session we just left
+  showSessionBannerIfNeeded();
 }
 
 // ── Compile ────────────────────────────────────────
