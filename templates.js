@@ -22,6 +22,12 @@ const Templates = (() => {
 #let dng-bg  = rgb("#fef2f2")
 #let dng-c   = rgb("#c0392b")
 
+// ── Style variables (edit in Document Settings) ──────
+#let card-stroke-top  = 5pt
+#let card-stroke-rest = 1.5pt
+#let card-inset       = 6mm
+#let title-bar-w      = 42mm
+
 // ── Footer state ─────────────────────────────────────
 #let fsec = state("fsec", "")
 #let fpg  = state("fpg",  "")
@@ -39,15 +45,15 @@ const Templates = (() => {
 #let ptitle(t) = [
   #text(size: 20pt, weight: "bold", fill: primary, t)
   #v(1mm)
-  #rect(width: 42mm, height: 3mm, fill: primary)
+  #rect(width: title-bar-w, height: 3mm, fill: primary)
   #v(6mm)
 ]
 
 // ── Helper: task card (num: none = no badge) ─────────
-#let tcard(num: none, title: "", inset: 6mm, colspan: 1, body) = grid.cell(
+#let tcard(num: none, title: "", inset: card-inset, colspan: 1, body) = grid.cell(
   colspan: colspan,
   fill: gradient.linear(white, rgb("#f7fbff"), dir: ttb),
-  stroke: (top: 5pt + primary, rest: 1.5pt + lc),
+  stroke: (top: card-stroke-top + primary, rest: card-stroke-rest + lc),
   inset: inset,
 )[
   #if num != none [

@@ -485,5 +485,199 @@ const EditorPanel = (() => {
   function esc(s) { return s.replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
   function rnd() { return Math.random().toString(36).slice(2, 6); }
 
-  return { buildForm, buildInsertForm };
+  // ── Document Settings form ──
+
+  const FRIENDLY = {
+    'primary': 'Primary Color', 'muted': 'Muted Text', 'ink': 'Text Color',
+    'lc': 'Light Accent', 'tint': 'Card Tint', 'tint2': 'Card Tint Alt',
+    'warn-bg': 'Warning Background', 'warn-c': 'Warning Color',
+    'ok-bg': 'Success Background', 'ok-c': 'Success Color',
+    'dng-bg': 'Danger Background', 'dng-c': 'Danger Color',
+    'card-stroke-top': 'Card Top Border', 'card-stroke-rest': 'Card Border',
+    'card-inset': 'Card Padding', 'title-bar-w': 'Title Bar Width',
+  };
+  function friendlyName(n) {
+    return FRIENDLY[n] || n.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  }
+  function ensureHash(v) { return v.startsWith('#') ? v : '#' + v; }
+
+  function buildDocumentSettingsForm(vars, onApplyVar) {
+    const wrap = document.createElement('div');
+
+    const header = document.createElement('div');
+    header.className = 'edit-section-title';
+    header.textContent = 'DOCUMENT SETTINGS';
+    wrap.appendChild(header);
+
+    if (!vars || vars.length === 0) {
+      const p = document.createElement('p');
+      p.className = 'placeholder';
+      p.textContent = 'No editable variables found. Add #let varname = rgb("#hex") or #let varname = 5mm to expose settings here.';
+      wrap.appendChild(p);
+      return wrap;
+    }
+
+    const colors = vars.filter(v => v.type === 'color');
+    const dims   = vars.filter(v => v.type === 'dimension');
+
+    if (colors.length > 0) {
+      const gh = document.createElement('div');
+      gh.className = 'edit-group-header';
+      gh.textContent = 'Colors';
+      wrap.appendChild(gh);
+
+      for (const v of colors) {
+        const div = document.createElement('div');
+        div.className = 'edit-field';
+        const lbl = document.createElement('label');
+        lbl.textContent = friendlyName(v.name);
+        div.appendChild(lbl);
+
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;gap:6px;align-items:center';
+
+        const cp = document.createElement('input');
+        cp.type = 'color';
+        cp.value = ensureHash(v.value);
+
+        const hexInput = document.createElement('input');
+        hexInput.type = 'text';
+        hexInput.style.cssText = 'width:90px;font-family:monospace';
+        hexInput.maxLength = 7;
+        hexInput.value = ensureHash(v.value);
+
+        cp.addEventListener('input', () => { hexInput.value = cp.value; });
+        hexInput.addEventListener('input', () => {
+          const val = hexInput.value.startsWith('#') ? hexInput.value : '#' + hexInput.value;
+          if (/^#[0-9a-fA-F]{6}$/.test(val)) cp.value = val;
+        });
+
+        const applyBtn = document.createElement('button');
+        applyBtn.className = 'btn btn-primary';
+        applyBtn.textContent = 'Apply';
+        applyBtn.style.cssText = 'padding:4px 10px';
+        applyBtn.addEventListener('click', () => {
+          onApplyVar(v.name, hexInput.value, 'color');
+        });
+
+        row.appendChild(cp);
+        row.appendChild(hexInput);
+        row.appendChild(applyBtn);
+        div.appendChild(row);
+        wrap.appendChild(div);
+      }
+    }
+
+    if (dims.length > 0) {
+      const gh = document.createElement('div');
+      gh.className = 'edit-group-header';
+      gh.textContent = 'Style';
+      wrap.appendChild(gh);
+
+      for (const v of dims) {
+        const div = document.createElement('div');
+        div.className = 'edit-field';
+        const lbl = document.createElement('label');
+        lbl.textContent = friendlyName(v.name);
+        div.appendChild(lbl);
+
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;gap:6px;align-items:center';
+
+        const inp = document.createElement('input');
+        inp.type = 'text';
+        inp.style.width = '90px';
+        inp.value = v.value;
+
+        const applyBtn = document.createElement('button');
+        applyBtn.className = 'btn btn-primary';
+        applyBtn.textContent = 'Apply';
+        applyBtn.style.cssText = 'padding:4px 10px';
+        applyBtn.addEventListener('click', () => {
+          onApplyVar(v.name, inp.value, 'dimension');
+        });
+
+        row.appendChild(inp);
+        row.appendChild(applyBtn);
+        div.appendChild(row);
+        wrap.appendChild(div);
+      }
+    }
+
+    return wrap;
+  }
+
+  // ── Add Section form ──
+
+  function genSectionCode(name, type, pageNum) {
+    const esc = s => String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const n = pageNum;
+    const header = `\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n// ${name.toUpperCase()}\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n#pagebreak()\n#fsec.update("${esc(name)}")\n#fpg.update("${n}")\n\n#ptitle("${esc(name)}")\n`;
+    if (type === 'standard') return header + `\n#grid(\n  columns: (1fr, 1fr),\n  gutter: 5mm,\n  align: top,\n  sintro("Overview")[\n    Describe this section.\n  ],\n  tcard(num: 1, title: "First Point")[\n    - Item one\n    - Item two\n    - Item three\n  ],\n  tcard(num: 2, title: "Second Point")[\n    - Item one\n    - Item two\n    - Item three\n  ],\n  ibox(type: "note")[\n    Notes for this section.\n  ],\n)\n`;
+    if (type === 'quickref') return header + `\n#grid(\n  columns: (1fr, 1fr, 1fr),\n  gutter: 5mm,\n  align: top,\n  tcard(num: none, title: "Topic 1")[\n    - Item one\n    - Item two\n    - Item three\n  ],\n  tcard(num: none, title: "Topic 2")[\n    - Item one\n    - Item two\n    - Item three\n  ],\n  tcard(num: none, title: "Topic 3")[\n    - Item one\n    - Item two\n    - Item three\n  ],\n)\n`;
+    if (type === 'fullwidth') return header + `\n#grid(\n  columns: (1fr, 1fr),\n  gutter: 5mm,\n  align: top,\n  sintro("Overview")[\n    Add your content here.\n  ],\n  ibox(type: "note")[\n    Important notes.\n  ],\n)\n`;
+    return header + `\n// Add content here\n`;
+  }
+
+  function buildAddSectionForm(pageCount, onInsert) {
+    const wrap = document.createElement('div');
+
+    const header = document.createElement('div');
+    header.className = 'edit-section-title';
+    header.textContent = 'ADD NEW SECTION';
+    wrap.appendChild(header);
+
+    const nameDiv = document.createElement('div');
+    nameDiv.className = 'edit-field';
+    nameDiv.innerHTML = '<label>Section Name</label>';
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.id = 'add-sec-name';
+    nameInput.value = 'New Section';
+    nameDiv.appendChild(nameInput);
+    wrap.appendChild(nameDiv);
+
+    const typeDiv = document.createElement('div');
+    typeDiv.className = 'edit-field';
+    typeDiv.innerHTML = '<label>Layout</label>';
+    const typeSelect = document.createElement('select');
+    typeSelect.id = 'add-sec-type';
+    typeSelect.innerHTML = `
+      <option value="standard">Standard (2-column with cards)</option>
+      <option value="quickref">Quick Reference (3-column)</option>
+      <option value="fullwidth">Full-width notes</option>
+      <option value="blank">Blank page</option>`;
+    typeDiv.appendChild(typeSelect);
+    wrap.appendChild(typeDiv);
+
+    const previewDiv = document.createElement('div');
+    previewDiv.className = 'edit-field';
+    previewDiv.innerHTML = '<label>Preview / Edit</label>';
+    const ta = document.createElement('textarea');
+    ta.className = 'source-editor';
+    ta.spellcheck = false;
+    ta.rows = 18;
+    previewDiv.appendChild(ta);
+    wrap.appendChild(previewDiv);
+
+    function updatePreview() {
+      ta.value = genSectionCode(nameInput.value, typeSelect.value, pageCount + 1);
+    }
+    nameInput.addEventListener('input', updatePreview);
+    typeSelect.addEventListener('change', updatePreview);
+    updatePreview();
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'btn-row';
+    const addBtn = document.createElement('button');
+    addBtn.className = 'btn btn-primary';
+    addBtn.textContent = 'Add Section';
+    addBtn.addEventListener('click', () => onInsert(ta.value));
+    btnRow.appendChild(addBtn);
+    wrap.appendChild(btnRow);
+
+    return wrap;
+  }
+
+  return { buildForm, buildInsertForm, buildDocumentSettingsForm, buildAddSectionForm };
 })();

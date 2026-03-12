@@ -459,3 +459,22 @@ html, body { height: 100%; font-family: system-ui, -apple-system, sans-serif; fo
 .field-default {
   color: var(--muted); font-style: italic;
 }
+
+/* ── Document Settings tree item ────────────────── */
+.tree-item-doc {
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+  padding-bottom: 6px;
+}
+.badge-doc {
+  background: #7c3aed; color: white;
+}
+
+/* ── Doc settings form ───────────────────────────── */
+.edit-group-header {
+  font-size: 10px; font-weight: 700; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.6px;
+  padding: 10px 0 4px; border-bottom: 1px solid var(--border);
+  margin-bottom: 6px;
+}
+.doc-color-row { display: flex; gap: 6px; align-items: center; }

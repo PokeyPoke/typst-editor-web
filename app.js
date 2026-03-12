@@ -24,6 +24,44 @@ const MAX_HISTORY = 20;
 // Typst WASM worker
 let worker = null;
 
+// ── Document var helpers ────────────────────────────
+
+function parseDocumentVars(src) {
+  const vars = [];
+  const colorPat = /^#let\s+([a-zA-Z][\w-]*)\s*=\s*rgb\("([^"]+)"\)/gm;
+  let m;
+  while ((m = colorPat.exec(src)) !== null) {
+    vars.push({ name: m[1], type: 'color', value: m[2].startsWith('#') ? m[2] : '#' + m[2] });
+  }
+  const dimPat = /^#let\s+([a-zA-Z][\w-]*)\s*=\s*(\d+(?:\.\d+)?(?:pt|mm|cm|em|in))/gm;
+  while ((m = dimPat.exec(src)) !== null) {
+    vars.push({ name: m[1], type: 'dimension', value: m[2] });
+  }
+  return vars;
+}
+
+function applyDocumentVar(name, newValue, type) {
+  pushHistory();
+  const eName = name.replace(/[-]/g, '\\-');
+  if (type === 'color') {
+    const v = newValue.startsWith('#') ? newValue : '#' + newValue;
+    source = source.replace(
+      new RegExp(`(#let\\s+${eName}\\s*=\\s*rgb\\()"[^"]+"(\\))`, 'm'),
+      `$1"${v}"$2`
+    );
+  } else {
+    source = source.replace(
+      new RegExp(`(#let\\s+${eName}\\s*=\\s*)\\d+(?:\\.\\d+)?(?:pt|mm|cm|em|in)`, 'm'),
+      `$1${newValue}`
+    );
+  }
+  saveTextSession();
+  revision++;
+  parsed = TypstParser.parse(source);
+  buildTree();
+  triggerCompile();
+}
+
 // ── DOM refs ───────────────────────────────────────
 const landingEl          = document.getElementById('landing');
 const appEl              = document.getElementById('app');
@@ -570,6 +608,19 @@ async function renderPdfPages(pdfBytes) {
 function buildTree() {
   treeContainer.innerHTML = '';
 
+  // Document Settings item — always shown at top
+  const docItem = document.createElement('div');
+  docItem.className = 'tree-item tree-item-doc';
+  const docBadge = document.createElement('span');
+  docBadge.className = 'type-badge badge-doc';
+  docBadge.textContent = 'doc';
+  const docLabel = document.createElement('span');
+  docLabel.textContent = 'Document Settings';
+  docItem.appendChild(docBadge);
+  docItem.appendChild(docLabel);
+  docItem.addEventListener('click', () => showDocumentSettings());
+  treeContainer.appendChild(docItem);
+
   const sections = new Map();
   for (const page of parsed.pages) {
     const key = `p${page.pageNum}`;
@@ -663,6 +714,33 @@ function showInsertForm(pageNum) {
   const form = EditorPanel.buildInsertForm(pageNum, insertElement);
   editContainer.appendChild(form);
   scrollToPage(pageNum);
+}
+
+function showDocumentSettings() {
+  treeContainer.querySelectorAll('.tree-item.selected').forEach(i => i.classList.remove('selected'));
+  treeContainer.querySelectorAll('.tree-item-doc').forEach(i => i.classList.add('selected'));
+  selectedElement = null;
+  editContainer.innerHTML = '';
+  const vars = parseDocumentVars(source);
+  const form = EditorPanel.buildDocumentSettingsForm(vars, applyDocumentVar);
+  editContainer.appendChild(form);
+}
+
+function showAddSectionForm() {
+  treeContainer.querySelectorAll('.tree-item.selected').forEach(i => i.classList.remove('selected'));
+  selectedElement = null;
+  editContainer.innerHTML = '';
+  const form = EditorPanel.buildAddSectionForm(parsed.pages.length, (code) => {
+    pushHistory();
+    source = source.trimEnd() + '\n' + code;
+    saveTextSession();
+    revision++;
+    parsed = TypstParser.parse(source);
+    showToast('Section added', 'success');
+    buildTree();
+    triggerCompile();
+  });
+  editContainer.appendChild(form);
 }
 
 // ── Element selection ──────────────────────────────
@@ -1087,6 +1165,7 @@ btnDlTyp.addEventListener('click', downloadTyp);
 btnDlPdf.addEventListener('click', downloadPdf);
 btnAddImages.addEventListener('click', () => imgInput.click());
 btnOpenFile.addEventListener('click', openDifferentFile);
+document.getElementById('btn-add-section').addEventListener('click', showAddSectionForm);
 document.getElementById('btn-dismiss-error').addEventListener('click', () => {
   errorPanel.style.display = 'none';
 });
