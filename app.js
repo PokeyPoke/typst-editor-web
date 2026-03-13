@@ -88,7 +88,7 @@ const btnOpenFile        = document.getElementById('btn-open-file');
 // ── Worker init ────────────────────────────────────
 
 function initWorker() {
-  worker = new Worker('./typst-worker.js', { type: 'module' });
+  worker = new Worker('./typst-worker.js?v=8', { type: 'module' });
 
   worker.onmessage = (e) => {
     const msg = e.data;
@@ -733,6 +733,16 @@ function showAddSectionForm() {
   const form = EditorPanel.buildAddSectionForm(parsed.pages.length, (code) => {
     pushHistory();
     source = source.trimEnd() + '\n' + code;
+
+    // Sync TOC if the document has one
+    const nameMatch = code.match(/#fsec\.update\("([^"]*)"\)/);
+    const numMatch  = code.match(/#fpg\.update\("([^"]*)"\)/);
+    if (nameMatch) {
+      const secName = nameMatch[1];
+      const secNum  = numMatch ? numMatch[1] : String(parsed.pages.length + 1);
+      source = insertTocEntry(source, secName, secNum);
+    }
+
     saveTextSession();
     revision++;
     parsed = TypstParser.parse(source);
@@ -894,7 +904,16 @@ function applyEdit(el, changes) {
 async function insertElement(pageNum, position, code) {
   const pageEls = parsed.elements.filter(e => e.page === pageNum);
   let insertLine;
-  if (pageEls.length > 0) {
+  if (position === 'page-end') {
+    // Insert after this page's entire content (outside the grid),
+    // i.e. just before the next page's #pagebreak() or at end of file.
+    const nextPage = parsed.pages.find(p => p.pageNum === pageNum + 1);
+    if (nextPage) {
+      insertLine = nextPage.lineStart - 1;
+    } else {
+      insertLine = source.split('\n').length;
+    }
+  } else if (pageEls.length > 0) {
     insertLine = pageEls[pageEls.length - 1].lineEnd;
   } else {
     const page = parsed.pages[pageNum - 1];
@@ -1009,6 +1028,31 @@ function fmtArg(name, val) {
 
 function escRx(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 function escTyp(str) { return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"'); }
+
+// Insert a TOC row after the last entry in a // TABLE OF CONTENTS block.
+// Returns src unchanged if no TOC block is found.
+function insertTocEntry(src, sectionName, sectionNum) {
+  const tocMarker = '// TABLE OF CONTENTS';
+  const tocIdx = src.indexOf(tocMarker);
+  if (tocIdx === -1) return src;
+
+  // TOC block ends at the first #pagebreak() that follows the marker
+  const pbIdx = src.indexOf('#pagebreak()', tocIdx);
+  if (pbIdx === -1) return src;
+
+  const tocBlock = src.slice(tocIdx, pbIdx);
+  const lastV = tocBlock.lastIndexOf('#v(2mm)');
+  if (lastV === -1) return src;
+
+  const insertAt = tocIdx + lastV + '#v(2mm)'.length;
+  const newEntry =
+    `\n#grid(\n  columns: (16pt, 1fr, auto),\n  gutter: 4mm,\n  align: horizon,\n` +
+    `  text(fill: primary, weight: "bold", "${sectionNum}"),\n` +
+    `  line(stroke: 0.5pt + lc),\n` +
+    `  text(fill: muted, "${escTyp(sectionName)}")\n)\n#v(2mm)`;
+
+  return src.slice(0, insertAt) + newEntry + src.slice(insertAt);
+}
 
 function replaceBody(slice, newBody) {
   for (let i = slice.length - 1; i >= 0; i--) {

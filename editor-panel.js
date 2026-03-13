@@ -420,7 +420,8 @@ const EditorPanel = (() => {
     btnRow.appendChild(mkBtn('Insert', 'btn-primary', () => {
       let code = ta.value;
       if (colCb.checked) code = code.replace(/(\w+\s*\()/, '$1colspan: 2, ');
-      onInsert(pageNum, 'end', code);
+      const position = typeSelect.value === 'pagebreak' ? 'page-end' : 'end';
+      onInsert(pageNum, position, code);
     }));
     wrap.appendChild(btnRow);
     return wrap;
@@ -450,6 +451,12 @@ const EditorPanel = (() => {
   columns: (1fr, 1fr),
   gutter: 5mm,
   align: top,
+  tcard(num: 1, title: "First Card")[
+    Add content here.
+  ],
+  tcard(num: 2, title: "Second Card")[
+    Add content here.
+  ],
 )`,
       custom: `  // Your Typst code here`,
     };
