@@ -37,6 +37,10 @@ function parseDocumentVars(src) {
   while ((m = dimPat.exec(src)) !== null) {
     vars.push({ name: m[1], type: 'dimension', value: m[2] });
   }
+  const strPat = /^#let\s+([a-zA-Z][\w-]*)\s*=\s*"([^"]*)"/gm;
+  while ((m = strPat.exec(src)) !== null) {
+    vars.push({ name: m[1], type: 'string', value: m[2] });
+  }
   return vars;
 }
 
@@ -49,10 +53,16 @@ function applyDocumentVar(name, newValue, type) {
       new RegExp(`(#let\\s+${eName}\\s*=\\s*rgb\\()"[^"]+"(\\))`, 'm'),
       `$1"${v}"$2`
     );
-  } else {
+  } else if (type === 'dimension') {
     source = source.replace(
       new RegExp(`(#let\\s+${eName}\\s*=\\s*)\\d+(?:\\.\\d+)?(?:pt|mm|cm|em|in)`, 'm'),
       `$1${newValue}`
+    );
+  } else if (type === 'string') {
+    const escaped = newValue.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    source = source.replace(
+      new RegExp(`(#let\\s+${eName}\\s*=\\s*)"[^"]*"`, 'm'),
+      `$1"${escaped}"`
     );
   }
   saveTextSession();
@@ -736,11 +746,8 @@ function showAddSectionForm() {
 
     // Sync TOC if the document has one
     const nameMatch = code.match(/#fsec\.update\("([^"]*)"\)/);
-    const numMatch  = code.match(/#fpg\.update\("([^"]*)"\)/);
     if (nameMatch) {
-      const secName = nameMatch[1];
-      const secNum  = numMatch ? numMatch[1] : String(parsed.pages.length + 1);
-      source = insertTocEntry(source, secName, secNum);
+      source = insertTocEntry(source, nameMatch[1]);
     }
 
     saveTextSession();
@@ -1031,7 +1038,7 @@ function escTyp(str) { return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"'); }
 
 // Insert a TOC row after the last entry in a // TABLE OF CONTENTS block.
 // Returns src unchanged if no TOC block is found.
-function insertTocEntry(src, sectionName, sectionNum) {
+function insertTocEntry(src, sectionName) {
   const tocMarker = '// TABLE OF CONTENTS';
   const tocIdx = src.indexOf(tocMarker);
   if (tocIdx === -1) return src;
@@ -1043,6 +1050,10 @@ function insertTocEntry(src, sectionName, sectionNum) {
   const tocBlock = src.slice(tocIdx, pbIdx);
   const lastV = tocBlock.lastIndexOf('#v(2mm)');
   if (lastV === -1) return src;
+
+  // Count existing entries to determine the next section number
+  const existingCount = (tocBlock.match(/#v\(2mm\)/g) || []).length;
+  const sectionNum = String(existingCount + 1);
 
   const insertAt = tocIdx + lastV + '#v(2mm)'.length;
   const newEntry =

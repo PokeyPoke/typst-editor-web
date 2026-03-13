@@ -443,7 +443,6 @@ const EditorPanel = (() => {
          width: 100%)`,
       pagebreak: `#pagebreak()
 #fsec.update("Section N: Title")
-#fpg.update("N")
 
 #ptitle("Section N: Title")
 
@@ -503,6 +502,7 @@ const EditorPanel = (() => {
     'card-stroke-top': 'Card Top Border', 'card-stroke-rest': 'Card Border',
     'card-inset': 'Card Padding', 'card-radius': 'Corner Radius',
     'title-bar-w': 'Title Bar Width',
+    'footer-center': 'Footer Center Text',
   };
   function friendlyName(n) {
     return FRIENDLY[n] || n.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
@@ -527,6 +527,7 @@ const EditorPanel = (() => {
 
     const colors = vars.filter(v => v.type === 'color');
     const dims   = vars.filter(v => v.type === 'dimension');
+    const strs   = vars.filter(v => v.type === 'string');
 
     if (colors.length > 0) {
       const gh = document.createElement('div');
@@ -612,6 +613,43 @@ const EditorPanel = (() => {
       }
     }
 
+    if (strs.length > 0) {
+      const gh = document.createElement('div');
+      gh.className = 'edit-group-header';
+      gh.textContent = 'Footer';
+      wrap.appendChild(gh);
+
+      for (const v of strs) {
+        const div = document.createElement('div');
+        div.className = 'edit-field';
+        const lbl = document.createElement('label');
+        lbl.textContent = friendlyName(v.name);
+        div.appendChild(lbl);
+
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;gap:6px;align-items:center';
+
+        const inp = document.createElement('input');
+        inp.type = 'text';
+        inp.style.flex = '1';
+        inp.value = v.value;
+        inp.placeholder = 'Leave blank to hide';
+
+        const applyBtn = document.createElement('button');
+        applyBtn.className = 'btn btn-primary';
+        applyBtn.textContent = 'Apply';
+        applyBtn.style.cssText = 'padding:4px 10px';
+        applyBtn.addEventListener('click', () => {
+          onApplyVar(v.name, inp.value, 'string');
+        });
+
+        row.appendChild(inp);
+        row.appendChild(applyBtn);
+        div.appendChild(row);
+        wrap.appendChild(div);
+      }
+    }
+
     return wrap;
   }
 
@@ -620,7 +658,7 @@ const EditorPanel = (() => {
   function genSectionCode(name, type, pageNum) {
     const esc = s => String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     const n = pageNum;
-    const header = `\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n// ${name.toUpperCase()}\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n#pagebreak()\n#fsec.update("${esc(name)}")\n#fpg.update("${n}")\n\n#ptitle("${esc(name)}")\n`;
+    const header = `\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n// ${name.toUpperCase()}\n// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n#pagebreak()\n#fsec.update("${esc(name)}")\n\n#ptitle("${esc(name)}")\n`;
     if (type === 'standard') return header + `\n#grid(\n  columns: (1fr, 1fr),\n  gutter: 5mm,\n  align: top,\n  sintro("Overview")[\n    Describe this section.\n  ],\n  tcard(num: 1, title: "First Point")[\n    - Item one\n    - Item two\n    - Item three\n  ],\n  tcard(num: 2, title: "Second Point")[\n    - Item one\n    - Item two\n    - Item three\n  ],\n  ibox(type: "note")[\n    Notes for this section.\n  ],\n)\n`;
     if (type === 'quickref') return header + `\n#grid(\n  columns: (1fr, 1fr, 1fr),\n  gutter: 5mm,\n  align: top,\n  tcard(num: none, title: "Topic 1")[\n    - Item one\n    - Item two\n    - Item three\n  ],\n  tcard(num: none, title: "Topic 2")[\n    - Item one\n    - Item two\n    - Item three\n  ],\n  tcard(num: none, title: "Topic 3")[\n    - Item one\n    - Item two\n    - Item three\n  ],\n)\n`;
     if (type === 'fullwidth') return header + `\n#grid(\n  columns: (1fr, 1fr),\n  gutter: 5mm,\n  align: top,\n  sintro("Overview")[\n    Add your content here.\n  ],\n  ibox(type: "note")[\n    Important notes.\n  ],\n)\n`;

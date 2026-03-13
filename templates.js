@@ -30,8 +30,8 @@ const Templates = (() => {
 #let title-bar-w      = 42mm
 
 // ── Footer state ─────────────────────────────────────
-#let fsec = state("fsec", "")
-#let fpg  = state("fpg",  "")
+#let fsec          = state("fsec", "")
+#let footer-center = ""
 
 // ── Helper: numbered circle badge ────────────────────
 #let badge(n) = box(
@@ -161,9 +161,12 @@ const Templates = (() => {
       gutter: 4mm,
       align: horizon,
       fsec.get(),
-      ${logoOrBlank},
+      if footer-center != "" { text(size: 8pt, fill: muted, footer-center) } else { ${logoOrBlank} },
       align(right + horizon,
-        text(fill: primary, weight: "bold", fpg.get()))
+        if counter(page).get().first() > 0 {
+          text(fill: primary, weight: "bold", counter(page).display())
+        }
+      )
     )
   ]
 )
@@ -266,7 +269,6 @@ const Templates = (() => {
 // PAGE 1
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #fsec.update("${escTyp(title)}")
-#fpg.update("1")
 
 #ptitle("${escTyp(title)}")
 
@@ -324,8 +326,8 @@ ${author   ? `    #v(3mm)\n    #text(size: 11pt, fill: muted, "${escTyp(author)}
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // TABLE OF CONTENTS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#counter(page).update(0)
 #fsec.update("")
-#fpg.update("")
 
 #align(center)[
   #text(size: 20pt, weight: "bold", fill: primary, "Contents")
@@ -345,7 +347,6 @@ ${author   ? `    #v(3mm)\n    #text(size: 11pt, fill: muted, "${escTyp(author)}
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #pagebreak()
 #fsec.update("${escTyp(name)}")
-#fpg.update("${i + 1}")
 
 #ptitle("${escTyp(name)}")
 
@@ -399,7 +400,6 @@ ${author   ? `    #v(3mm)\n    #text(size: 11pt, fill: muted, "${escTyp(author)}
 // CONTENT
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #fsec.update("${escTyp(title)}")
-#fpg.update("1")
 
 #ptitle("${escTyp(title)}")
 ${subtitle ? `#text(size: 11pt, fill: muted, "${escTyp(subtitle)}")\n#v(4mm)` : ''}
@@ -428,8 +428,8 @@ ${cards})
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // TITLE PAGE
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#counter(page).update(0)
 #fsec.update("")
-#fpg.update("")
 
 #v(30mm)
 #align(center)[
@@ -449,7 +449,6 @@ ${subtitle ? `  #v(5mm)\n  #text(size: 13pt, fill: muted, "${escTyp(subtitle)}")
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #pagebreak()
 #fsec.update("${escTyp(name)}")
-#fpg.update("${i + 1}")
 
 #ptitle("${escTyp(name)}")
 
