@@ -87,33 +87,24 @@ const EditorPanel = (() => {
     info.textContent = `Lines ${el.lineStart}–${el.lineEnd} · Page ${el.page}`;
     wrap.appendChild(info);
 
-    // page-block: source-only, no Properties tab
-    const sourceOnly = el.type === 'page-block';
-
     // Tabs
     const tabBar = document.createElement('div');
     tabBar.className = 'tab-bar';
-    const tabProps  = mkTab('Properties', !sourceOnly);
-    const tabSource = mkTab('Source', sourceOnly);
-    if (!sourceOnly) tabBar.appendChild(tabProps);
+    const tabProps  = mkTab('Properties', true);
+    const tabSource = mkTab('Source', false);
+    tabBar.appendChild(tabProps);
     tabBar.appendChild(tabSource);
     wrap.appendChild(tabBar);
 
     // Properties panel
     const propsPanel = document.createElement('div');
-    propsPanel.className = 'tab-panel' + (sourceOnly ? ' hidden' : '');
-    const fields = sourceOnly ? {} : buildPropertyFields(el, propsPanel);
-    if (!sourceOnly) wrap.appendChild(propsPanel);
+    propsPanel.className = 'tab-panel';
+    const fields = buildPropertyFields(el, propsPanel);
+    wrap.appendChild(propsPanel);
 
     // Source panel
     const sourcePanel = document.createElement('div');
-    sourcePanel.className = 'tab-panel' + (sourceOnly ? '' : ' hidden');
-    if (sourceOnly) {
-      const hint = document.createElement('div');
-      hint.style.cssText = 'font-size:11px;color:var(--muted);margin-bottom:8px;font-style:italic';
-      hint.textContent = 'Edit the cover page layout directly. Changes apply to the full #page(…)[…] block.';
-      sourcePanel.appendChild(hint);
-    }
+    sourcePanel.className = 'tab-panel hidden';
     const sourceTa = document.createElement('textarea');
     sourceTa.className = 'source-editor';
     sourceTa.value = el.sourceSlice;
@@ -121,10 +112,8 @@ const EditorPanel = (() => {
     sourcePanel.appendChild(sourceTa);
     wrap.appendChild(sourcePanel);
 
-    if (!sourceOnly) {
-      tabProps.addEventListener('click',  () => activate(tabProps, tabSource, propsPanel, sourcePanel));
-      tabSource.addEventListener('click', () => activate(tabSource, tabProps, sourcePanel, propsPanel));
-    }
+    tabProps.addEventListener('click',  () => activate(tabProps, tabSource, propsPanel, sourcePanel));
+    tabSource.addEventListener('click', () => activate(tabSource, tabProps, sourcePanel, propsPanel));
 
     // Buttons
     const btnRow = document.createElement('div');
@@ -133,6 +122,8 @@ const EditorPanel = (() => {
     btnRow.appendChild(mkBtn('Apply', 'btn-primary', () => {
       if (!sourcePanel.classList.contains('hidden')) {
         onApply(el, { __raw: sourceTa.value });
+      } else if (fields.__generateRaw) {
+        onApply(el, { __raw: fields.__generateRaw.getValue() });
       } else {
         const changes = {};
         for (const [k, f] of Object.entries(fields)) {
@@ -155,7 +146,90 @@ const EditorPanel = (() => {
     return wrap;
   }
 
+  // ── Cover page helpers ──
+
+  function parseCoverFields(src) {
+    const titleM    = src.match(/upper\s*\(\s*"([^"]*)"\s*\)/);
+    const title     = titleM ? titleM[1] : '';
+
+    const titleSzM  = src.match(/text\s*\(\s*size:\s*([^,]+),\s*weight:\s*"bold"/);
+    const titleSize = titleSzM ? titleSzM[1].trim() : '28pt';
+
+    // Collect all text(size: Xpt, fill: muted, "...") lines (subtitle, author)
+    let subtitle = '', subtitleSize = '14pt', author = '', authorSize = '11pt';
+    const mutedPat = /text\s*\(\s*size:\s*(\d+pt),\s*fill:\s*muted,\s*"([^"]*)"\s*\)/g;
+    let mm;
+    while ((mm = mutedPat.exec(src)) !== null) {
+      const sz = parseInt(mm[1]);
+      if (sz >= 13) { subtitle = mm[2]; subtitleSize = mm[1]; }
+      else          { author   = mm[2]; authorSize   = mm[1]; }
+    }
+
+    const barM    = src.match(/rect\s*\(\s*width:\s*([^,)]+)/);
+    const barWidth = barM ? barM[1].trim() : '60mm';
+
+    return { title, titleSize, subtitle, subtitleSize, author, authorSize, barWidth };
+  }
+
+  function regenerateCover(f) {
+    const e = s => String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    return (
+      `#page(\n  paper: "a4",\n  margin: (top: 22mm, bottom: 26mm, left: 26mm, right: 26mm),\n` +
+      `  background: rect(width: 100%, height: 100%, stroke: 2pt + lc, fill: white),\n  footer: none,\n)[\n` +
+      `  #v(1fr)\n  #align(center)[\n` +
+      `    #text(size: ${f.titleSize}, weight: "bold", fill: primary, upper("${e(f.title)}"))\n` +
+      (f.subtitle ? `    #v(4mm)\n    #text(size: ${f.subtitleSize}, fill: muted, "${e(f.subtitle)}")\n` : '') +
+      (f.author   ? `    #v(3mm)\n    #text(size: ${f.authorSize}, fill: muted, "${e(f.author)}")\n`   : '') +
+      `    #v(8mm)\n    #rect(width: ${f.barWidth}, height: 2pt, fill: primary)\n  ]\n  #v(1fr)\n]`
+    );
+  }
+
+  function buildCoverPropertyFields(el, container) {
+    const f = parseCoverFields(el.sourceSlice);
+
+    const mkGH = text => {
+      const gh = document.createElement('div');
+      gh.className = 'field-group-header';
+      gh.textContent = text;
+      container.appendChild(gh);
+    };
+
+    mkGH('Content');
+    const fTitle = addTextField(container, 'Title',             f.title,    '');
+    const fSub   = addTextField(container, 'Subtitle',          f.subtitle, 'Optional — leave blank to hide');
+    const fAuth  = addTextField(container, 'Author / Company',  f.author,   'Optional — leave blank to hide');
+
+    mkGH('Style');
+    const fTSize = addTextField(container, 'Title Font Size',   f.titleSize,  'e.g. 28pt');
+    const fBar   = addTextField(container, 'Accent Bar Width',  f.barWidth,   'e.g. 60mm');
+
+    const getVals = () => ({
+      title:       fTitle.getValue(),
+      subtitle:    fSub.getValue(),
+      author:      fAuth.getValue(),
+      titleSize:   fTSize.getValue() || f.titleSize,
+      subtitleSize: f.subtitleSize,
+      authorSize:   f.authorSize,
+      barWidth:    fBar.getValue() || f.barWidth,
+    });
+
+    return {
+      _coverTitle: fTitle,
+      _coverSub:   fSub,
+      _coverAuth:  fAuth,
+      _coverTSize: fTSize,
+      _coverBar:   fBar,
+      __generateRaw: {
+        getValue: () => regenerateCover(getVals()),
+        isDirty:  () => true,
+        reset:    () => {},
+      },
+    };
+  }
+
   function buildPropertyFields(el, container) {
+    if (el.type === 'page-block') return buildCoverPropertyFields(el, container);
+
     const propDef = PROPS[el.type];
     if (!propDef) {
       container.innerHTML = '<p class="placeholder">No properties defined for this type. Use Source tab.</p>';
