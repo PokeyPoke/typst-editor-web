@@ -333,9 +333,92 @@ const EditorPanel = (() => {
     const ta = document.createElement('textarea');
     ta.value = value;
     const original = value;
+    attachToolbar(div, ta);
     div.appendChild(ta);
     parent.appendChild(div);
     return { getValue: () => ta.value, isDirty: () => ta.value !== original, reset: () => { ta.value = original; } };
+  }
+
+  // ── Typst formatting toolbar ──
+
+  function attachToolbar(container, ta) {
+    const toolbar = document.createElement('div');
+    toolbar.className = 'text-toolbar';
+
+    function wrap(before, after, placeholder) {
+      const s = ta.selectionStart, e = ta.selectionEnd;
+      const sel = ta.value.slice(s, e) || placeholder || 'text';
+      ta.setRangeText(before + sel + after, s, e, 'select');
+      if (!ta.value.slice(s, e)) {
+        ta.setSelectionRange(s + before.length, s + before.length + sel.length);
+      } else {
+        ta.setSelectionRange(s + before.length, s + before.length + sel.length);
+      }
+      ta.focus();
+    }
+
+    function prefixLines(prefix) {
+      const s = ta.selectionStart, e = ta.selectionEnd;
+      const text = ta.value;
+      const lineStart = text.lastIndexOf('\n', s - 1) + 1;
+      let lineEnd = text.indexOf('\n', e);
+      if (lineEnd === -1) lineEnd = text.length;
+      const before = text.slice(0, lineStart);
+      const chunk  = text.slice(lineStart, lineEnd);
+      const after  = text.slice(lineEnd);
+      const lineCount = (chunk.match(/\n/g) || []).length + 1;
+      ta.value = before + chunk.split('\n').map(l => prefix + l).join('\n') + after;
+      ta.setSelectionRange(s + prefix.length, e + prefix.length * lineCount);
+      ta.focus();
+    }
+
+    function insertBlock(text) {
+      const s = ta.selectionStart;
+      const before = ta.value.slice(0, s);
+      const lineStart = before.endsWith('\n') || before === '' ? '' : '\n';
+      const insert = lineStart + text + '\n';
+      ta.setRangeText(insert, s, s, 'end');
+      ta.focus();
+    }
+
+    const BTNS = [
+      { l: 'B',   title: 'Bold',             css: 'font-weight:700',                  fn: () => wrap('*', '*') },
+      { l: 'I',   title: 'Italic',            css: 'font-style:italic',                fn: () => wrap('_', '_') },
+      { l: 'U',   title: 'Underline',         css: 'text-decoration:underline',        fn: () => wrap('#underline[', ']') },
+      { l: 'S',   title: 'Strikethrough',     css: 'text-decoration:line-through',     fn: () => wrap('#strike[', ']') },
+      { sep: true },
+      { l: '`',   title: 'Inline code',       css: 'font-family:monospace;font-size:13px', fn: () => wrap('`', '`') },
+      { l: '⌨',  title: 'Code block',        css: '',                                 fn: () => wrap('```\n', '\n```') },
+      { sep: true },
+      { l: '•',   title: 'Bullet list item',  css: '',                                 fn: () => prefixLines('- ') },
+      { l: '1.',  title: 'Numbered list item',css: 'font-size:10px',                   fn: () => prefixLines('+ ') },
+      { l: '  →', title: 'Indent',            css: 'font-size:10px;letter-spacing:-1px',fn: () => prefixLines('  ') },
+      { sep: true },
+      { l: 'x²',  title: 'Superscript',       css: 'font-size:10px',                   fn: () => wrap('#super[', ']') },
+      { l: 'x₂',  title: 'Subscript',         css: 'font-size:10px',                   fn: () => wrap('#sub[', ']') },
+      { l: '🔗',  title: 'Link',              css: '',                                  fn: () => wrap('#link("url")[', ']', 'link text') },
+      { sep: true },
+      { l: '―',   title: 'Horizontal rule',   css: 'font-size:16px;line-height:1',     fn: () => insertBlock('#line(length: 100%, stroke: 0.5pt + lc)') },
+    ];
+
+    for (const b of BTNS) {
+      if (b.sep) {
+        const s = document.createElement('span');
+        s.className = 'toolbar-sep';
+        toolbar.appendChild(s);
+        continue;
+      }
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'toolbar-btn';
+      btn.title = b.title;
+      btn.textContent = b.l;
+      if (b.css) btn.style.cssText = b.css;
+      btn.addEventListener('mousedown', e => { e.preventDefault(); b.fn(); });
+      toolbar.appendChild(btn);
+    }
+
+    container.appendChild(toolbar);
   }
 
   function addNumField(parent, label, value) {
@@ -472,6 +555,7 @@ const EditorPanel = (() => {
     const ta = document.createElement('textarea');
     ta.className = 'source-editor';
     ta.spellcheck = false;
+    attachToolbar(wrap, ta);
     wrap.appendChild(ta);
 
     function update() { ta.value = getTemplate(typeSelect.value); }
@@ -777,6 +861,7 @@ const EditorPanel = (() => {
     ta.className = 'source-editor';
     ta.spellcheck = false;
     ta.rows = 18;
+    attachToolbar(previewDiv, ta);
     previewDiv.appendChild(ta);
     wrap.appendChild(previewDiv);
 
