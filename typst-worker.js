@@ -155,9 +155,14 @@ async function makePlaceholderForPath(path) {
 async function doCompile(source, files) {
   if (!compiler) await initCompiler();
 
-  // Rewrite "../foo/bar" → "/foo/bar" in string literals so all paths stay
-  // within the virtual root "/". Images are mapped at /images/…
-  const compileSrc = source.replace(/"\.\.\/([^"]*)"/g, '"/$1"');
+  // Pass 1: rewrite "../foo/bar" → "/foo/bar" in string literals so all paths
+  // stay within the virtual root "/".
+  // Pass 2: flatten any nested image subpath "/images/a/b/…/" → "/images/" so
+  // files stored by basename under /images/ are always found, regardless of
+  // what subdirectory structure the original document used.
+  const compileSrc = source
+    .replace(/"\.\.\/([^"]*)"/g, '"/$1"')
+    .replace(/"\/images\/(?:[^"\/]+\/)+/g, '"/images/');
 
   const extractBytes = (result) => {
     if (result instanceof Uint8Array) return result;
