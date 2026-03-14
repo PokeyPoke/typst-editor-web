@@ -74,7 +74,7 @@ const EditorPanel = (() => {
 
   // ── Build form ──
 
-  function buildForm(el, onApply, pageElements) {
+  function buildForm(el, onApply, pageElements, sectionName) {
     const wrap = document.createElement('div');
 
     const header = document.createElement('div');
@@ -84,7 +84,7 @@ const EditorPanel = (() => {
 
     const info = document.createElement('div');
     info.className = 'line-info';
-    info.textContent = `Lines ${el.lineStart}–${el.lineEnd} · Page ${el.page}`;
+    info.textContent = `Lines ${el.lineStart}–${el.lineEnd} · Page ${el.page}` + (sectionName ? ` · ${sectionName}` : '');
     wrap.appendChild(info);
 
     // Tabs
@@ -136,11 +136,23 @@ const EditorPanel = (() => {
       sourceTa.value = el.sourceSlice;
       for (const f of Object.values(fields)) f.reset();
     }));
-    btnRow.appendChild(mkBtn('Delete', 'btn-danger', () => {
-      if (confirm(`Delete this ${el.type}? (lines ${el.lineStart}–${el.lineEnd})`)) {
-        onApply(el, { __delete: true });
-      }
-    }));
+    const deleteBtn = mkBtn('Delete', 'btn-danger', () => {
+      btnRow.innerHTML = '';
+      const confirmMsg = document.createElement('span');
+      confirmMsg.style.cssText = 'font-size:11px;color:var(--muted);align-self:center';
+      confirmMsg.textContent = 'Delete this element?';
+      btnRow.appendChild(confirmMsg);
+      btnRow.appendChild(mkBtn('Confirm', 'btn-danger', () => onApply(el, { __delete: true })));
+      btnRow.appendChild(mkBtn('Cancel', 'btn-secondary', () => {
+        btnRow.innerHTML = '';
+        btnRow.appendChild(applyBtn);
+        btnRow.appendChild(resetBtn);
+        btnRow.appendChild(deleteBtn);
+      }));
+    });
+    const applyBtn = btnRow.querySelector('.btn-primary');
+    const resetBtn = btnRow.querySelector('.btn-secondary');
+    btnRow.appendChild(deleteBtn);
 
     wrap.appendChild(btnRow);
     return wrap;
@@ -186,6 +198,11 @@ const EditorPanel = (() => {
 
   function buildCoverPropertyFields(el, container) {
     const f = parseCoverFields(el.sourceSlice);
+
+    const warning = document.createElement('div');
+    warning.style.cssText = 'font-size:11px;color:#a06000;background:#fffbf0;border:1px solid #f0c060;border-radius:4px;padding:6px 8px;margin-bottom:8px;';
+    warning.textContent = 'Applying will regenerate the standard cover layout. Custom page attributes outside Title/Subtitle/Author/Bar Width will be reset.';
+    container.appendChild(warning);
 
     const mkGH = text => {
       const gh = document.createElement('div');
@@ -418,6 +435,110 @@ const EditorPanel = (() => {
       toolbar.appendChild(btn);
     }
 
+    // Image picker button
+    const imgSep = document.createElement('span');
+    imgSep.className = 'toolbar-sep';
+    toolbar.appendChild(imgSep);
+
+    const imgBtn = document.createElement('button');
+    imgBtn.type = 'button';
+    imgBtn.className = 'toolbar-btn';
+    imgBtn.title = 'Insert image';
+    imgBtn.textContent = '🖼';
+    imgBtn.addEventListener('mousedown', e => { e.preventDefault(); showImagePicker(ta, imgBtn); });
+    toolbar.appendChild(imgBtn);
+
+    function showImagePicker(ta, anchorBtn) {
+      const existing = document.getElementById('img-picker-popup');
+      if (existing) { existing._revoke?.(); existing.remove(); return; }
+
+      const images = (typeof window.getLoadedImages === 'function') ? window.getLoadedImages() : {};
+      const popup = document.createElement('div');
+      popup.id = 'img-picker-popup';
+      popup.className = 'img-picker-popup';
+
+      const keys = Object.keys(images);
+      if (keys.length === 0) {
+        const empty = document.createElement('p');
+        empty.className = 'img-picker-empty';
+        empty.textContent = 'No images loaded. Open the Image Manager (🖼 in the sidebar) to load images first.';
+        popup.appendChild(empty);
+      } else {
+        // Read image-radius from document settings
+        const docVars = (typeof window.getDocumentVars === 'function') ? window.getDocumentVars() : [];
+        const radiusVar = docVars.find(v => v.name === 'image-radius');
+        const radiusVal = radiusVar ? parseFloat(radiusVar.value) : 0;
+        const radiusStr = radiusVar ? radiusVar.value : '0pt';
+
+        const getSnippet = path => radiusVal > 0
+          ? `#box(radius: ${radiusStr}, clip: true, image("${path}", width: 100%))`
+          : `#image("${path}", width: 100%)`;
+
+        if (radiusVal > 0) {
+          const hint = document.createElement('p');
+          hint.className = 'img-picker-hint';
+          hint.textContent = `Corner radius: ${radiusStr} (set in Document Settings)`;
+          popup.appendChild(hint);
+        }
+
+        const grid = document.createElement('div');
+        grid.className = 'img-picker-grid';
+        const blobUrls = [];
+
+        for (const key of keys) {
+          const buf = images[key];
+          const name = key.split('/').pop();
+          const snippetPath = key.startsWith('/') ? '..' + key : key;
+
+          const card = document.createElement('div');
+          card.className = 'img-picker-card';
+          card.title = name;
+
+          const thumb = document.createElement('img');
+          thumb.className = 'img-picker-thumb';
+          try {
+            const blob = new Blob([buf]);
+            const url = URL.createObjectURL(blob);
+            blobUrls.push(url);
+            thumb.src = url;
+          } catch (_) { thumb.alt = name; }
+
+          const label = document.createElement('span');
+          label.className = 'img-picker-label';
+          label.textContent = name;
+
+          card.appendChild(thumb);
+          card.appendChild(label);
+          card.addEventListener('mousedown', e => {
+            e.preventDefault();
+            insertBlock(getSnippet(snippetPath));
+            blobUrls.forEach(u => URL.revokeObjectURL(u));
+            popup.remove();
+            document.removeEventListener('mousedown', outsideHandler);
+          });
+          grid.appendChild(card);
+        }
+
+        popup._revoke = () => blobUrls.forEach(u => URL.revokeObjectURL(u));
+        popup.appendChild(grid);
+      }
+
+      document.body.appendChild(popup);
+      const rect = anchorBtn.getBoundingClientRect();
+      const pw = popup.offsetWidth || 260;
+      popup.style.left = Math.max(4, Math.min(rect.left, window.innerWidth - pw - 8)) + 'px';
+      popup.style.top = (rect.bottom + window.scrollY + 4) + 'px';
+
+      const outsideHandler = e => {
+        if (!popup.contains(e.target) && e.target !== anchorBtn) {
+          popup._revoke?.();
+          popup.remove();
+          document.removeEventListener('mousedown', outsideHandler);
+        }
+      };
+      setTimeout(() => document.addEventListener('mousedown', outsideHandler), 0);
+    }
+
     container.appendChild(toolbar);
   }
 
@@ -597,7 +718,7 @@ const EditorPanel = (() => {
     Introduction text here.
   ],`,
       ptitle: `#ptitle("Page Title")`,
-      image: `  #image("../images/TechUI/processed/filename.png",
+      image: `  #image("/images/filename.png",
          width: 100%)`,
       pagebreak: `#pagebreak()
 #fsec.update("Section N: Title")

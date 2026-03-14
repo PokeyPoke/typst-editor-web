@@ -16,6 +16,11 @@ let selectedElement = null;
 let revision = 0;
 let currentPdfBytes = null;
 let imageFiles = {};      // path → ArrayBuffer
+let previewZoom = 1.0;
+window.getLoadedImages = () => imageFiles;
+window.getDocumentVars = () => parseDocumentVars(source);
+let linkedDirHandle = null;
+let galleryObjectUrls = [];   // tracked so we can revoke on rebuild
 
 // Undo history
 let sourceHistory = [];
@@ -94,11 +99,16 @@ const btnDlTyp           = document.getElementById('btn-download-typ');
 const btnDlPdf           = document.getElementById('btn-download-pdf');
 const btnAddImages       = document.getElementById('btn-add-images');
 const btnOpenFile        = document.getElementById('btn-open-file');
+const dropOverlay        = document.getElementById('drop-overlay');
+const btnZoomIn          = document.getElementById('btn-zoom-in');
+const btnZoomOut         = document.getElementById('btn-zoom-out');
+const btnZoomReset       = document.getElementById('btn-zoom-reset');
+const zoomLevelEl        = document.getElementById('zoom-level');
 
 // ── Worker init ────────────────────────────────────
 
 function initWorker() {
-  worker = new Worker('./typst-worker.js?v=8', { type: 'module' });
+  worker = new Worker('./typst-worker.js?v=14', { type: 'module' });
 
   worker.onmessage = (e) => {
     const msg = e.data;
@@ -112,7 +122,7 @@ function initWorker() {
     }
 
     if (msg.type === 'pdf-result') {
-      currentPdfBytes = new Uint8Array(msg.pdf);
+      currentPdfBytes = msg.pdf; // keep as ArrayBuffer — Uint8Array view is detached by PDF.js
       btnDlPdf.disabled = false;
       setCompileStatus('');
       compileBanner.style.display = 'none';
@@ -120,6 +130,10 @@ function initWorker() {
       renderPdfPages(currentPdfBytes).catch(err => {
         showToast('Render error: ' + err.message, 'error');
       });
+      if (msg.placeholderCount > 0) {
+        const n = msg.placeholderCount;
+        showToast(`${n} missing image${n !== 1 ? 's' : ''} shown as placeholders — open Image Manager to load`, 'info');
+      }
     }
 
     if (msg.type === 'error') {
@@ -127,9 +141,9 @@ function initWorker() {
       compileBanner.style.display = 'none';
       if (previewPlaceholder) previewPlaceholder.style.display = 'none';
       errorPanel.style.display = '';
+      console.error('Worker error:', msg.message);
       errorText.textContent = msg.message;
       showToast('Compile error — see error panel', 'error');
-      console.error('Worker error:', msg.message);
     }
   };
 
@@ -423,7 +437,7 @@ function setLandingStatus(text, isError) {
 
 // ── File loading ───────────────────────────────────
 
-function enterEditor(src, fname) {
+async function enterEditor(src, fname) {
   filename = fname || 'document.typ';
   source = src;
   sourceHistory = [];
@@ -431,6 +445,7 @@ function enterEditor(src, fname) {
   saveTextSession();
   showEditor();
   initWorker();
+  await tryRestoreDirHandle();
   triggerCompile();
 }
 
@@ -451,9 +466,8 @@ async function loadImageFiles(files) {
   for (const f of files) {
     const buf = await f.arrayBuffer();
     const name = f.name;
-    // Store at the absolute path typst resolves to from /main.typ:
-    // #image("../images/TechUI/processed/foo.png") → /images/TechUI/processed/foo.png
-    imageFiles[`/images/TechUI/processed/${name}`] = buf;
+    // Store at the absolute path used by #image("/images/foo.png"):
+    imageFiles[`/images/${name}`] = buf;
     // Also store by bare filename for robustness
     imageFiles[name] = buf;
     loaded.push(name);
@@ -466,18 +480,34 @@ async function loadImageFiles(files) {
   if (appEl.style.display !== 'none') {
     showToast(`Loaded ${loaded.length} image${loaded.length !== 1 ? 's' : ''}`, 'success');
     triggerCompile();
+    updateFileInfo();
+    refreshImageManagerIfOpen();
   }
+}
+
+function updateFileInfo() {
+  const { refs, missing } = imageRefStatus();
+  const loadedCount = refs.length - missing.length;
+  let text = `${filename} · ${parsed.elements.length} elements`;
+  if (refs.length > 0) {
+    text += ` · ${loadedCount}/${refs.length} images`;
+    if (missing.length > 0) text += ' ⚠';
+  }
+  fileInfo.textContent = text;
+  fileInfo.title = missing.length > 0
+    ? `Missing: ${missing.map(r => r.split('/').pop()).join(', ')}`
+    : refs.length > 0 ? 'All referenced images loaded' : '';
 }
 
 function showEditor() {
   landingEl.style.display = 'none';
   appEl.style.display = 'flex';
-  fileInfo.textContent = filename;
   svgContainer.innerHTML = '';
   buildTree();
   editContainer.innerHTML = '<p class="placeholder">Select an element from the tree to edit its properties.</p>';
   errorPanel.style.display = 'none';
   btnDlPdf.disabled = true;
+  document.getElementById('zoom-bar').style.display = '';
   if (previewPlaceholder) previewPlaceholder.style.display = '';
 }
 
@@ -489,6 +519,7 @@ function doCloseEditor() {
   selectedElement = null;
   currentPdfBytes = null;
   imageFiles = {};
+  linkedDirHandle = null;
   sourceHistory = [];
   imgCount.textContent = '';
   btnDlPdf.disabled = true;
@@ -556,25 +587,34 @@ function doCompile() {
 
 // ── PDF.js page rendering ──────────────────────────
 
+let _renderSeq = 0; // incremented on every render; stale renders self-abort
+
 async function renderPdfPages(pdfBytes) {
-  // PDF.js uses 72pt/inch. A4 = 595pt wide. Scale to ~500px to match SVG cards.
-  const SCALE = 500 / 595;
+  const seq = ++_renderSeq;
+
+  // PDF.js uses 72pt/inch. A4 = 595pt wide. Base scale ~500px, multiplied by zoom.
+  const SCALE = (500 / 595) * previewZoom;
 
   // Remember where we are before wiping the container
   const returnToPage = selectedElement?.page ?? null;
   const savedScrollTop = previewPanel.scrollTop;
 
+  // PDF.js transfers the ArrayBuffer to its internal worker — always pass a copy
+  // so our stored currentPdfBytes stays intact for subsequent zoom re-renders.
   const loadTask = pdfjsLib.getDocument({
-    data: pdfBytes,
+    data: new Uint8Array(pdfBytes instanceof ArrayBuffer ? pdfBytes : pdfBytes.buffer).slice(),
     disableRange: true,
     disableStream: true,
   });
   const pdf = await loadTask.promise;
+  if (seq !== _renderSeq) { pdf.destroy(); return; } // superseded
 
   svgContainer.innerHTML = '';
   if (previewPlaceholder) previewPlaceholder.style.display = 'none';
 
   for (let i = 1; i <= pdf.numPages; i++) {
+    if (seq !== _renderSeq) { pdf.destroy(); return; } // superseded mid-render
+
     const page = await pdf.getPage(i);
     const viewport = page.getViewport({ scale: SCALE });
 
@@ -586,6 +626,8 @@ async function renderPdfPages(pdfBytes) {
     const ctx = canvas.getContext('2d');
     await page.render({ canvasContext: ctx, viewport }).promise;
     page.cleanup();
+
+    if (seq !== _renderSeq) { pdf.destroy(); return; } // superseded after render
 
     const pageDiv = document.createElement('div');
     pageDiv.className = 'svg-page';
@@ -631,6 +673,26 @@ function buildTree() {
   docItem.addEventListener('click', () => showDocumentSettings());
   treeContainer.appendChild(docItem);
 
+  // Images item
+  const imgTreeItem = document.createElement('div');
+  imgTreeItem.className = 'tree-item tree-item-img';
+  const imgBadge = document.createElement('span');
+  imgBadge.className = 'type-badge badge-img';
+  imgBadge.textContent = 'img';
+  const imgLabel = document.createElement('span');
+  imgLabel.textContent = 'Images';
+  imgTreeItem.appendChild(imgBadge);
+  imgTreeItem.appendChild(imgLabel);
+  const { refs: imgRefs, missing: imgMissing } = imageRefStatus();
+  if (imgRefs.length > 0) {
+    const countBadge = document.createElement('span');
+    countBadge.className = 'img-count-badge ' + (imgMissing.length > 0 ? 'img-count-warn' : 'img-count-ok');
+    countBadge.textContent = `${imgRefs.length - imgMissing.length}/${imgRefs.length}`;
+    imgTreeItem.appendChild(countBadge);
+  }
+  imgTreeItem.addEventListener('click', () => showImageManager());
+  treeContainer.appendChild(imgTreeItem);
+
   const sections = new Map();
   for (const page of parsed.pages) {
     const key = `p${page.pageNum}`;
@@ -663,8 +725,24 @@ function buildTree() {
     const nameSpan = document.createElement('span');
     nameSpan.textContent = sec.name;
 
+    const sortedPages = [...parsed.pages].sort((a, b) => a.pageNum - b.pageNum);
+    const secIdx = sortedPages.findIndex(p => p.pageNum === sec.pageNum);
+    const secMoveGroup = document.createElement('span');
+    secMoveGroup.className = 'tree-move-btns';
+    const secUp = document.createElement('button');
+    secUp.type = 'button'; secUp.className = 'tree-move-btn'; secUp.textContent = '↑';
+    secUp.title = 'Move section up'; secUp.disabled = secIdx <= 0;
+    secUp.addEventListener('click', e => { e.stopPropagation(); moveSectionInSource(sec.pageNum, -1); });
+    const secDown = document.createElement('button');
+    secDown.type = 'button'; secDown.className = 'tree-move-btn'; secDown.textContent = '↓';
+    secDown.title = 'Move section down'; secDown.disabled = secIdx >= sortedPages.length - 1;
+    secDown.addEventListener('click', e => { e.stopPropagation(); moveSectionInSource(sec.pageNum, 1); });
+    secMoveGroup.appendChild(secUp);
+    secMoveGroup.appendChild(secDown);
+
     header.appendChild(arrow);
     header.appendChild(nameSpan);
+    header.appendChild(secMoveGroup);
 
     // Arrow click → toggle collapse only
     arrow.addEventListener('click', (e) => {
@@ -681,7 +759,8 @@ function buildTree() {
     const items = document.createElement('div');
     items.className = 'tree-section-items';
 
-    for (const el of sec.elements) {
+    for (let ei = 0; ei < sec.elements.length; ei++) {
+      const el = sec.elements[ei];
       const item = document.createElement('div');
       item.className = 'tree-item';
       item.dataset.lineStart = el.lineStart;
@@ -693,9 +772,23 @@ function buildTree() {
 
       const name = document.createElement('span');
       name.textContent = el.title || `(line ${el.lineStart})`;
-      name.style.overflow = 'hidden';
-      name.style.textOverflow = 'ellipsis';
+      name.style.cssText = 'overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0';
+      item.title = el.title || el.type;
       item.appendChild(name);
+
+      const moveGroup = document.createElement('span');
+      moveGroup.className = 'tree-move-btns';
+      const upBtn = document.createElement('button');
+      upBtn.type = 'button'; upBtn.className = 'tree-move-btn'; upBtn.textContent = '↑';
+      upBtn.title = 'Move element up'; upBtn.disabled = ei === 0;
+      upBtn.addEventListener('click', e => { e.stopPropagation(); moveElementInSource(el, -1); });
+      const downBtn = document.createElement('button');
+      downBtn.type = 'button'; downBtn.className = 'tree-move-btn'; downBtn.textContent = '↓';
+      downBtn.title = 'Move element down'; downBtn.disabled = ei === sec.elements.length - 1;
+      downBtn.addEventListener('click', e => { e.stopPropagation(); moveElementInSource(el, 1); });
+      moveGroup.appendChild(upBtn);
+      moveGroup.appendChild(downBtn);
+      item.appendChild(moveGroup);
 
       item.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -716,6 +809,7 @@ function buildTree() {
     sectionDiv.appendChild(items);
     treeContainer.appendChild(sectionDiv);
   }
+  updateFileInfo();
 }
 
 function showInsertForm(pageNum) {
@@ -756,6 +850,7 @@ function showAddSectionForm() {
     showToast('Section added', 'success');
     buildTree();
     triggerCompile();
+    scrollToPage(parsed.pages.length);
   });
   editContainer.appendChild(form);
 }
@@ -782,7 +877,8 @@ function selectElement(el, treeItem) {
 
   editContainer.innerHTML = '';
   const pageElements = parsed.elements.filter(e => e.page === el.page);
-  const form = EditorPanel.buildForm(el, applyEdit, pageElements);
+  const sectionName = parsed.pages.find(p => p.pageNum === el.page)?.sectionName;
+  const form = EditorPanel.buildForm(el, applyEdit, pageElements, sectionName);
   editContainer.appendChild(form);
 }
 
@@ -818,6 +914,68 @@ function undoEdit() {
   showToast(`Undone (${sourceHistory.length} step${sourceHistory.length !== 1 ? 's' : ''} remaining)`, 'success');
 }
 
+// ── Reorder: move element within its page ──────────
+function moveElementInSource(el, dir) {
+  const pageEls = parsed.elements
+    .filter(e => e.page === el.page)
+    .sort((a, b) => a.lineStart - b.lineStart);
+  const idx = pageEls.findIndex(e => e.lineStart === el.lineStart);
+  const swapIdx = idx + dir;
+  if (swapIdx < 0 || swapIdx >= pageEls.length) return;
+
+  const A = pageEls[Math.min(idx, swapIdx)];
+  const B = pageEls[Math.max(idx, swapIdx)];
+  const lines = source.split('\n');
+  const linesA   = lines.slice(A.lineStart - 1, A.lineEnd);
+  const linesB   = lines.slice(B.lineStart - 1, B.lineEnd);
+  const between  = lines.slice(A.lineEnd, B.lineStart - 1);
+  const before   = lines.slice(0, A.lineStart - 1);
+  const after    = lines.slice(B.lineEnd);
+
+  pushHistory();
+  source = [...before, ...linesB, ...between, ...linesA, ...after].join('\n');
+  revision++;
+  saveTextSession();
+  parsed = TypstParser.parse(source);
+  buildTree();
+  triggerCompile();
+}
+
+// ── Reorder: move entire section (page) up or down ─
+function moveSectionInSource(pageNum, dir) {
+  const sortedPages = [...parsed.pages].sort((a, b) => a.pageNum - b.pageNum);
+  const idx = sortedPages.findIndex(p => p.pageNum === pageNum);
+  const swapIdx = idx + dir;
+  if (swapIdx < 0 || swapIdx >= sortedPages.length) return;
+
+  const aIdx = Math.min(idx, swapIdx);
+  const bIdx = Math.max(idx, swapIdx);
+  const A = sortedPages[aIdx];
+  const B = sortedPages[bIdx];
+  const C = sortedPages[bIdx + 1]; // may be undefined
+
+  const lines = source.split('\n');
+
+  // Block start: include the #pagebreak() line for all pages except the first
+  const aStart = A.pageNum === 1 ? 0 : A.lineStart - 2;   // 0-based
+  const bStart = B.pageNum === 1 ? 0 : B.lineStart - 2;   // 0-based
+  const aEnd   = bStart - 1;                               // 0-based inclusive
+  const bEnd   = C ? C.lineStart - 3 : lines.length - 1;  // 0-based inclusive
+
+  const linesA  = lines.slice(aStart, aEnd + 1);
+  const linesB  = lines.slice(bStart, bEnd + 1);
+  const before  = lines.slice(0, aStart);
+  const after   = lines.slice(bEnd + 1);
+
+  pushHistory();
+  source = [...before, ...linesB, ...linesA, ...after].join('\n');
+  revision++;
+  saveTextSession();
+  parsed = TypstParser.parse(source);
+  buildTree();
+  triggerCompile();
+}
+
 // ── Apply edit ─────────────────────────────────────
 function applyEdit(el, changes) {
   let newText;
@@ -838,7 +996,6 @@ function applyEdit(el, changes) {
     newText = changes.__raw;
   } else {
     if (Object.keys(changes).length === 0) {
-      showToast('No changes to apply', 'info');
       return;
     }
     try {
@@ -1121,10 +1278,11 @@ let idb = null;
 async function openIDB() {
   if (idb) return idb;
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open('typst-editor', 1);
+    const req = indexedDB.open('typst-editor', 2);
     req.onupgradeneeded = (e) => {
       const d = e.target.result;
       if (!d.objectStoreNames.contains('images')) d.createObjectStore('images');
+      if (!d.objectStoreNames.contains('settings')) d.createObjectStore('settings');
     };
     req.onsuccess  = (e) => { idb = e.target.result; resolve(idb); };
     req.onerror    = ()  => reject(req.error);
@@ -1137,7 +1295,9 @@ function saveTextSession() {
     localStorage.setItem(SESSION_KEY, JSON.stringify({
       source, filename, savedAt: Date.now(), imageCount: imageNames.length,
     }));
-  } catch (_) {}
+  } catch (e) {
+    if (e?.name === 'QuotaExceededError') showToast('Auto-save failed: browser storage full. Download your .typ to avoid losing work.', 'error');
+  }
 }
 
 async function saveImagesToIDB() {
@@ -1195,15 +1355,343 @@ function timeAgo(ms) {
   return `${Math.floor(s / 86400)} day(s) ago`;
 }
 
+// ── Image reference parsing ─────────────────────────
+
+function parseImageRefs(src) {
+  const refs = new Set();
+  const imgPat = /#image\("([^"]+)"/g;
+  let m;
+  while ((m = imgPat.exec(src)) !== null) refs.add(m[1]);
+  // tabimg("name") constructs "/images/" + name
+  const tabPat = /\btabimg\("([^"]+)"\)/g;
+  while ((m = tabPat.exec(src)) !== null) refs.add('/images/' + m[1]);
+  return [...refs];
+}
+
+function isImageLoaded(ref) {
+  const name = ref.split('/').pop();
+  return !!(imageFiles[name] || imageFiles[ref.replace(/^\.\.\//, '/')]);
+}
+
+function imageRefStatus() {
+  const refs = parseImageRefs(source);
+  const missing = refs.filter(r => !isImageLoaded(r));
+  const loaded  = refs.filter(r =>  isImageLoaded(r));
+  return { refs, loaded, missing };
+}
+
+function refreshImageManagerIfOpen() {
+  if (editContainer.querySelector('.img-manager-panel')) {
+    editContainer.innerHTML = '';
+    editContainer.appendChild(buildImageManagerPanel());
+  }
+}
+
+// ── Image Manager panel ─────────────────────────────
+
+function showImageManager() {
+  treeContainer.querySelectorAll('.tree-item.selected').forEach(i => i.classList.remove('selected'));
+  treeContainer.querySelectorAll('.tree-item-img').forEach(i => i.classList.add('selected'));
+  selectedElement = null;
+  editContainer.innerHTML = '';
+  editContainer.appendChild(buildImageManagerPanel());
+}
+
+function buildImageManagerPanel() {
+  // Revoke any blob URLs from a previous gallery render
+  galleryObjectUrls.forEach(u => URL.revokeObjectURL(u));
+  galleryObjectUrls = [];
+
+  const wrap = document.createElement('div');
+  wrap.className = 'img-manager-panel';
+
+  const header = document.createElement('div');
+  header.className = 'edit-section-title';
+  header.textContent = 'IMAGE MANAGER';
+  wrap.appendChild(header);
+
+  const { refs, loaded, missing } = imageRefStatus();
+
+  const summary = document.createElement('div');
+  summary.className = 'line-info';
+  summary.textContent = refs.length === 0
+    ? 'No image references found in document.'
+    : `${loaded.length} of ${refs.length} referenced images loaded.`;
+  if (refs.length > 0 && missing.length === 0) {
+    summary.style.color = 'var(--success)';
+  }
+  wrap.appendChild(summary);
+
+  // Inline drop zone
+  const zone = document.createElement('div');
+  zone.className = 'img-drop-zone';
+  zone.textContent = 'Drop images here — or use the buttons below';
+  zone.addEventListener('dragover',  (e) => { e.preventDefault(); e.stopPropagation(); zone.classList.add('drag-active'); });
+  zone.addEventListener('dragleave', (e) => { e.stopPropagation(); zone.classList.remove('drag-active'); });
+  zone.addEventListener('drop', async (e) => {
+    e.preventDefault(); e.stopPropagation();
+    zone.classList.remove('drag-active');
+    const imgs = [...e.dataTransfer.files].filter(f => f.type.startsWith('image/'));
+    if (imgs.length) await loadImageFiles(imgs);
+  });
+  wrap.appendChild(zone);
+
+  // Action buttons
+  const btnRow = document.createElement('div');
+  btnRow.className = 'btn-row';
+  btnRow.style.marginTop = '0';
+
+  if (window.showDirectoryPicker) {
+    const linkBtn = document.createElement('button');
+    linkBtn.className = 'btn btn-primary';
+    linkBtn.style.cssText = 'font-size:11px;padding:5px 12px';
+    linkBtn.textContent = linkedDirHandle ? '↺ Re-link folder' : '📁 Link folder…';
+    linkBtn.title = 'Pick your images folder — loads all images automatically on every session';
+    linkBtn.addEventListener('click', linkImageFolder);
+    btnRow.appendChild(linkBtn);
+  }
+
+  const loadBtn = document.createElement('button');
+  loadBtn.className = 'btn btn-secondary';
+  loadBtn.style.cssText = 'font-size:11px;padding:5px 12px';
+  loadBtn.textContent = 'Load files…';
+  loadBtn.addEventListener('click', () => imgInput.click());
+  btnRow.appendChild(loadBtn);
+
+  const uniqueLoaded = Object.keys(imageFiles).filter(k => !k.includes('/')).length;
+  if (uniqueLoaded > 0) {
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'btn btn-secondary';
+    clearBtn.style.cssText = 'font-size:11px;padding:5px 12px;color:var(--danger);border-color:var(--danger)';
+    clearBtn.textContent = 'Clear all';
+    clearBtn.addEventListener('click', async () => {
+      imageFiles = {};
+      linkedDirHandle = null;
+      await clearIDB();
+      await saveDirHandle(null);
+      showToast('Images cleared', 'info');
+      triggerCompile();
+      updateFileInfo();
+      buildTree();
+      editContainer.innerHTML = '';
+      editContainer.appendChild(buildImageManagerPanel());
+    });
+    btnRow.appendChild(clearBtn);
+  }
+
+  wrap.appendChild(btnRow);
+
+  if (linkedDirHandle) {
+    const linked = document.createElement('div');
+    linked.style.cssText = 'font-size:10px;color:var(--success);margin-top:6px;';
+    linked.textContent = `✓ Linked folder: ${linkedDirHandle.name}`;
+    wrap.appendChild(linked);
+  } else if (window.showDirectoryPicker) {
+    const hint = document.createElement('div');
+    hint.style.cssText = 'font-size:10px;color:var(--muted);margin-top:6px;font-style:italic;line-height:1.5';
+    hint.textContent = 'Tip: link a folder to auto-load all images every session — or just drop them above.';
+    wrap.appendChild(hint);
+  }
+
+  // Gallery — referenced images
+  if (refs.length > 0) {
+    const gh = document.createElement('div');
+    gh.className = 'img-gallery-header';
+    gh.textContent = `In document (${refs.length})`;
+    wrap.appendChild(gh);
+
+    const grid = document.createElement('div');
+    grid.className = 'img-gallery';
+    for (const ref of refs) {
+      grid.appendChild(buildImageCard(ref, isImageLoaded(ref)));
+    }
+    wrap.appendChild(grid);
+  }
+
+  // Extra loaded images (not referenced in doc — e.g. pasted)
+  const referencedNames = new Set(refs.map(r => r.split('/').pop()));
+  const extraNames = Object.keys(imageFiles).filter(k => !k.includes('/') && !referencedNames.has(k));
+  if (extraNames.length > 0) {
+    const gh = document.createElement('div');
+    gh.className = 'img-gallery-header';
+    gh.textContent = `Extra loaded (${extraNames.length})`;
+    wrap.appendChild(gh);
+
+    const grid = document.createElement('div');
+    grid.className = 'img-gallery';
+    for (const name of extraNames) {
+      grid.appendChild(buildImageCard(name, true, true));
+    }
+    wrap.appendChild(grid);
+  }
+
+  return wrap;
+}
+
+function buildImageCard(ref, isLoaded, isExtra) {
+  const name = typeof ref === 'string' ? ref.split('/').pop() : ref;
+  const card = document.createElement('div');
+  card.className = 'img-card ' + (isLoaded ? 'is-loaded' : 'is-missing');
+  card.title = isLoaded ? `Click to copy snippet for ${name}` : `Missing: ${name}`;
+
+  // Thumbnail
+  const thumb = document.createElement('div');
+  thumb.className = 'img-card-thumb';
+  if (isLoaded) {
+    const imgKey = imageFiles[name] ? name : (typeof ref === 'string' ? ref.replace(/^\.\.\//, '/') : name);
+    const buf = imageFiles[imgKey];
+    if (buf) {
+      const img = document.createElement('img');
+      const url = URL.createObjectURL(new Blob([buf]));
+      galleryObjectUrls.push(url);
+      img.src = url;
+      img.alt = name;
+      thumb.appendChild(img);
+    } else {
+      thumb.innerHTML = '<div class="img-card-placeholder">🖼</div>';
+    }
+  } else {
+    thumb.innerHTML = '<div class="img-card-placeholder">?</div>';
+  }
+  card.appendChild(thumb);
+
+  // Info row
+  const info = document.createElement('div');
+  info.className = 'img-card-info';
+  const nameEl = document.createElement('div');
+  nameEl.className = 'img-card-name';
+  nameEl.textContent = name;
+  nameEl.title = typeof ref === 'string' ? ref : name;
+  info.appendChild(nameEl);
+  const badge = document.createElement('span');
+  badge.className = 'img-badge ' + (isLoaded ? 'img-badge-ok' : 'img-badge-missing');
+  badge.textContent = isLoaded ? 'loaded' : 'missing';
+  info.appendChild(badge);
+  card.appendChild(info);
+
+  // Click to copy snippet
+  if (isLoaded) {
+    const snippetPath = `/images/${name}`;
+    card.addEventListener('click', () => {
+      const snippet = `#image("${snippetPath}", width: 100%)`;
+      navigator.clipboard.writeText(snippet).then(() => {
+        showToast(`Copied snippet for ${name}`, 'success');
+      }).catch(() => {
+        showToast(`${snippet}`, 'info');
+      });
+    });
+  }
+
+  return card;
+}
+
+// ── Directory handle (folder link) ──────────────────
+
+async function linkImageFolder() {
+  try {
+    const handle = await window.showDirectoryPicker({ mode: 'read' });
+    linkedDirHandle = handle;
+    const count = await loadFromDirHandle(handle);
+    await saveDirHandle(handle);
+    saveTextSession();
+    saveImagesToIDB();
+    showToast(`Loaded ${count} images from folder`, 'success');
+    updateFileInfo();
+    buildTree();
+    triggerCompile();
+    refreshImageManagerIfOpen();
+  } catch (e) {
+    if (e.name !== 'AbortError') showToast('Could not open folder: ' + e.message, 'error');
+  }
+}
+
+async function loadFromDirHandle(handle) {
+  let count = 0;
+  for await (const [name, entry] of handle.entries()) {
+    if (entry.kind !== 'file') continue;
+    if (!/\.(png|jpg|jpeg|gif|svg|webp)$/i.test(name)) continue;
+    try {
+      const buf = await (await entry.getFile()).arrayBuffer();
+      imageFiles[`/images/${name}`] = buf;
+      imageFiles[name] = buf;
+      count++;
+    } catch (_) {}
+  }
+  return count;
+}
+
+async function saveDirHandle(handle) {
+  try {
+    const d = await openIDB();
+    const tx = d.transaction('settings', 'readwrite');
+    if (handle) tx.objectStore('settings').put(handle, 'dir-handle');
+    else        tx.objectStore('settings').delete('dir-handle');
+  } catch (_) {}
+}
+
+async function loadDirHandle() {
+  try {
+    const d = await openIDB();
+    return await new Promise(resolve => {
+      const req = d.transaction('settings', 'readonly').objectStore('settings').get('dir-handle');
+      req.onsuccess = () => resolve(req.result ?? null);
+      req.onerror   = () => resolve(null);
+    });
+  } catch (_) { return null; }
+}
+
+async function tryRestoreDirHandle() {
+  const handle = await loadDirHandle();
+  if (!handle) return;
+  try {
+    const perm = await handle.queryPermission({ mode: 'read' });
+    if (perm === 'granted') {
+      linkedDirHandle = handle;
+      await loadFromDirHandle(handle);
+      updateFileInfo();
+    }
+    // If perm === 'prompt': user will see "Re-link folder" in Image Manager
+  } catch (_) {}
+}
+
 // ── Toast ──────────────────────────────────────────
 function showToast(message, type = 'info') {
   const container = document.getElementById('toast-container');
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
-  toast.textContent = message;
+  const text = document.createElement('span');
+  text.textContent = message;
+  toast.appendChild(text);
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'toast-close';
+  closeBtn.textContent = '✕';
+  closeBtn.addEventListener('click', () => toast.remove());
+  toast.appendChild(closeBtn);
   container.appendChild(toast);
-  setTimeout(() => toast.remove(), 4000);
+  if (type !== 'error') {
+    setTimeout(() => toast.remove(), 4000);
+  }
 }
+
+// ── Zoom controls ──────────────────────────────────
+function setZoom(z) {
+  previewZoom = Math.max(0.25, Math.min(3.0, z));
+  zoomLevelEl.textContent = Math.round(previewZoom * 100) + '%';
+  btnZoomOut.disabled = previewZoom <= 0.25;
+  btnZoomIn.disabled  = previewZoom >= 3.0;
+  if (currentPdfBytes) renderPdfPages(currentPdfBytes).catch(err => showToast('Zoom error: ' + err.message, 'error'));
+}
+
+btnZoomIn.addEventListener('click',    () => setZoom(previewZoom + 0.25));
+btnZoomOut.addEventListener('click',   () => setZoom(previewZoom - 0.25));
+btnZoomReset.addEventListener('click', () => setZoom(1.0));
+
+previewPanel.addEventListener('wheel', (e) => {
+  if (e.ctrlKey || e.metaKey) {
+    e.preventDefault();
+    setZoom(previewZoom + (e.deltaY < 0 ? 0.25 : -0.25));
+  }
+}, { passive: false });
 
 // ── Keyboard shortcuts ─────────────────────────────
 document.addEventListener('keydown', (e) => {
@@ -1211,6 +1699,15 @@ document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
     e.preventDefault();
     undoEdit();
+  }
+  if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
+    e.preventDefault(); setZoom(previewZoom + 0.25);
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key === '-') {
+    e.preventDefault(); setZoom(previewZoom - 0.25);
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key === '0') {
+    e.preventDefault(); setZoom(1.0);
   }
 });
 
@@ -1225,6 +1722,53 @@ document.getElementById('btn-dismiss-error').addEventListener('click', () => {
   errorPanel.style.display = 'none';
 });
 btnDlPdf.disabled = true;
+
+// ── Drag & drop images onto the app ────────────────
+let dragCounter = 0;
+
+appEl.addEventListener('dragenter', (e) => {
+  if (!e.dataTransfer.types.includes('Files')) return;
+  dragCounter++;
+  if (dragCounter === 1) {
+    dropOverlay.style.display = 'flex';
+    e.preventDefault();
+  }
+});
+
+appEl.addEventListener('dragover', (e) => {
+  if (!e.dataTransfer.types.includes('Files')) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+});
+
+appEl.addEventListener('dragleave', () => {
+  dragCounter = Math.max(0, dragCounter - 1);
+  if (dragCounter === 0) dropOverlay.style.display = 'none';
+});
+
+appEl.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  dragCounter = 0;
+  dropOverlay.style.display = 'none';
+  const imgs = [...e.dataTransfer.files].filter(f => f.type.startsWith('image/'));
+  if (imgs.length) await loadImageFiles(imgs);
+});
+
+// ── Paste images from clipboard ─────────────────────
+document.addEventListener('paste', async (e) => {
+  if (appEl.style.display === 'none') return;
+  const el = document.activeElement;
+  if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+  const items = [...e.clipboardData.items].filter(i => i.kind === 'file' && i.type.startsWith('image/'));
+  if (!items.length) return;
+  e.preventDefault();
+  const files = items.map(item => {
+    const blob = item.getAsFile();
+    const ext  = item.type === 'image/jpeg' ? '.jpg' : item.type === 'image/gif' ? '.gif' : '.png';
+    return new File([blob], `pasted-${Date.now()}${ext}`, { type: item.type });
+  });
+  await loadImageFiles(files);
+});
 
 // Warn before closing/refreshing the tab while a document is open
 window.addEventListener('beforeunload', (e) => {

@@ -53,9 +53,8 @@
           <input type="file" id="img-input" accept="image/*" multiple style="display:none">
           <span id="img-count" class="landing-img-count"></span>
           <p class="landing-hint">
-            Select image files referenced in your document (e.g. from
-            <code>/images/TechUI/processed/</code>).
-            Images not loaded will appear blank in the preview.
+            Select image files referenced in your document.
+            Images not loaded will appear as placeholders in the preview.
           </p>
         </div>
       </div>
@@ -80,19 +79,28 @@
 
   <!-- ── Main editor (hidden until file loaded) ────── -->
   <div id="app" style="display:none">
+    <!-- Full-app drag-and-drop overlay -->
+    <div id="drop-overlay" class="drop-overlay" style="display:none">
+      <div class="drop-overlay-inner">
+        <div class="drop-overlay-icon">🖼</div>
+        <p>Drop images to load them</p>
+      </div>
+    </div>
     <aside id="tree-panel">
       <div class="panel-header">
         <h2>Elements</h2>
         <div class="header-btns">
           <button id="btn-add-section" title="Add a new section page">+ Section</button>
-          <button id="btn-open-file" title="Load a different file">Open…</button>
-          <button id="btn-download-typ" title="Download .typ source">⬇ .typ</button>
-          <button id="btn-download-pdf" title="Download PDF" disabled>⬇ PDF</button>
+          <button id="btn-open-file" title="Open a different file (saves session for recovery)">Switch File…</button>
         </div>
       </div>
       <div class="file-info-row">
         <div id="file-info" class="file-info"></div>
-        <button id="btn-add-images" class="add-images-btn" title="Load image files">+ images</button>
+        <div class="file-action-btns">
+          <button id="btn-add-images" class="add-images-btn" title="Load image files">+ images</button>
+          <button id="btn-download-typ" class="add-images-btn" title="Download .typ source">⬇ .typ</button>
+          <button id="btn-download-pdf" class="add-images-btn" title="Download PDF" disabled>⬇ PDF</button>
+        </div>
       </div>
       <div id="tree-container"></div>
     </aside>
@@ -116,6 +124,13 @@
         <div class="preview-placeholder-spinner"></div>
         <p>Loading compiler and fonts…</p>
         <p class="preview-placeholder-sub">First compile downloads ~15 MB of fonts from CDN.<br>This takes 20–40 s; subsequent compiles are fast.</p>
+      </div>
+
+      <div id="zoom-bar" class="zoom-bar" style="display:none">
+        <button id="btn-zoom-out" class="zoom-btn" title="Zoom out (Ctrl+−)" disabled>−</button>
+        <span id="zoom-level" class="zoom-level">100%</span>
+        <button id="btn-zoom-in" class="zoom-btn" title="Zoom in (Ctrl++)">+</button>
+        <button id="btn-zoom-reset" class="zoom-btn zoom-btn-reset" title="Reset zoom (Ctrl+0)">↺</button>
       </div>
 
       <div id="svg-container"></div>
@@ -144,6 +159,7 @@
       </p>
       <p class="modal-note">
         The auto-recovery feature only restores sessions interrupted by unexpected events like power outages or browser crashes — not intentional navigation.
+        Your edits are auto-saved in this browser and can be recovered if you reload.
       </p>
       <div class="modal-btns">
         <button class="btn btn-primary" id="btn-modal-download">&#8595; Download &amp; continue</button>

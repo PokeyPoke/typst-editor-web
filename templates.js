@@ -27,6 +27,7 @@ const Templates = (() => {
 #let card-stroke-rest = 1.5pt
 #let card-inset       = 6mm
 #let card-radius      = 4pt
+#let image-radius     = 0pt
 #let title-bar-w      = 42mm
 
 // ── Footer state ─────────────────────────────────────
@@ -132,7 +133,7 @@ const Templates = (() => {
 #let tabimg(name) = box(
   height: 5.5mm,
   baseline: -30%,
-  image("../images/TechUI/processed/" + name)
+  image("/images/" + name)
 )`;
   }
 
