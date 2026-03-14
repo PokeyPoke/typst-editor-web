@@ -221,13 +221,29 @@ async function doCompile(source, files) {
   const placeholders = new Map();
   const providedSet = new Set((files || []).map(f => f.path));
 
-  // Pre-scan: map placeholders for all literal image paths in source before
-  // the first compile attempt. This handles direct #image("path") references
-  // without needing any retries.
+  // Build basename → data lookup so we can serve files even when the path
+  // in the source doesn't match the path the file was loaded under.
+  // e.g. source uses "/images/TechUI/processed/foo.png" but file was loaded
+  // as "/images/foo.png" — basename "foo.png" resolves the mismatch.
+  const byBasename = new Map();
+  for (const f of files || []) {
+    const base = f.path.split('/').pop();
+    if (base && !byBasename.has(base)) byBasename.set(base, f.data);
+  }
+
+  const resolveFile = async (p) => {
+    if (providedSet.has(p)) return null; // already mapped via files array
+    const base = p.split('/').pop();
+    const data = base && byBasename.get(base);
+    if (data) return new Uint8Array(data instanceof ArrayBuffer ? data : data);
+    return makePlaceholderForPath(p);
+  };
+
+  // Pre-scan: map all literal image paths in source before the first compile.
   const litPat = /"(\/[^"]+\.(?:png|jpg|jpeg|gif|svg|webp))"/gi;
   for (const [, p] of compileSrc.matchAll(litPat)) {
     if (!providedSet.has(p) && !placeholders.has(p)) {
-      placeholders.set(p, await makePlaceholderForPath(p));
+      placeholders.set(p, await resolveFile(p));
     }
   }
 
@@ -265,7 +281,7 @@ async function doCompile(source, files) {
         const newPaths = [...capturedMissing].filter(p => !placeholders.has(p));
         if (newPaths.length > 0) {
           for (const p of newPaths) {
-            placeholders.set(p, await makePlaceholderForPath(p));
+            placeholders.set(p, await resolveFile(p));
           }
           continue; // retry with placeholders mapped
         }
