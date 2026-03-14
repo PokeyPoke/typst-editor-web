@@ -108,7 +108,7 @@ const zoomLevelEl        = document.getElementById('zoom-level');
 // ── Worker init ────────────────────────────────────
 
 function initWorker() {
-  worker = new Worker('./typst-worker.js?v=16', { type: 'module' });
+  worker = new Worker('./typst-worker.js?v=17', { type: 'module' });
 
   worker.onmessage = (e) => {
     const msg = e.data;

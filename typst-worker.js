@@ -244,9 +244,20 @@ async function doCompile(source, files) {
     return makePlaceholderForPath(p);
   };
 
-  // Pre-scan: map all literal image paths in source before the first compile.
+  // Pre-scan 1: complete absolute path literals e.g. "/images/foo.png"
   const litPat = /"(\/[^"]+\.(?:png|jpg|jpeg|gif|svg|webp))"/gi;
   for (const [, p] of compileSrc.matchAll(litPat)) {
+    if (!providedSet.has(p) && !placeholders.has(p)) {
+      placeholders.set(p, await resolveFile(p));
+    }
+  }
+
+  // Pre-scan 2: bare image filenames anywhere in source (catches string-concat
+  // patterns like tabimg("foo.png") where the full path is never a literal).
+  // Map each to /images/<name> which is where the path-flatten rewrite lands.
+  const namePat = /["(]([a-zA-Z0-9_\-]+\.(?:png|jpg|jpeg|gif|svg|webp))[")]/gi;
+  for (const [, name] of compileSrc.matchAll(namePat)) {
+    const p = '/images/' + name;
     if (!providedSet.has(p) && !placeholders.has(p)) {
       placeholders.set(p, await resolveFile(p));
     }
